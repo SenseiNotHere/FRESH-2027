@@ -116,30 +116,32 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain):
                 back_right
             ] # Module constants list
         )
-        
-        # Configure motor neutral modes
-        drive_output_config = MotorOutputConfigs()
-        drive_output_config.neutral_mode = ModuleConstants.kDrivingMotorIdleMode
-        steer_output_config = MotorOutputConfigs()
-        steer_output_config.neutral_mode = ModuleConstants.kTurningMotorIdleMode
-
-        # Configure current limits
-        drive_current_config = CurrentLimitsConfigs()
-        drive_current_config.supply_current_limit = ModuleConstants.kDrivingMotorCurrentLimit
-        drive_current_config.supply_current_limit_enable = True
-        drive_current_config.stator_current_limit = ModuleConstants.kDrivingMotorStatorCurrentLimit
-        drive_current_config.stator_current_limit_enable = True
-
-        steer_current_config = CurrentLimitsConfigs()
-        steer_current_config.supply_current_limit = ModuleConstants.kTurningMotorCurrentLimit
-        steer_current_config.supply_current_limit_enable = True
-        steer_current_config.stator_current_limit = ModuleConstants.kTurningStatorCurrentLimit
-        steer_current_config.stator_current_limit_enable = True
 
         for module in self.modules:
+            drive_output_config = MotorOutputConfigs()
+            module.drive_motor.configurator.refresh(drive_output_config)
+            drive_output_config.neutral_mode = ModuleConstants.kDrivingMotorIdleMode
             module.drive_motor.configurator.apply(drive_output_config)
-            module.drive_motor.configurator.apply(drive_current_config)
+
+            steer_output_config = MotorOutputConfigs()
+            module.steer_motor.configurator.refresh(steer_output_config)
+            steer_output_config.neutral_mode = ModuleConstants.kTurningMotorIdleMode
             module.steer_motor.configurator.apply(steer_output_config)
+
+            drive_current_config = CurrentLimitsConfigs()
+            module.drive_motor.configurator.refresh(drive_current_config)
+            drive_current_config.supply_current_limit = ModuleConstants.kDrivingMotorCurrentLimit
+            drive_current_config.supply_current_limit_enable = True
+            drive_current_config.stator_current_limit = ModuleConstants.kDrivingMotorStatorCurrentLimit
+            drive_current_config.stator_current_limit_enable = True
+            module.drive_motor.configurator.apply(drive_current_config)
+
+            steer_current_config = CurrentLimitsConfigs()
+            module.steer_motor.configurator.refresh(steer_current_config)
+            steer_current_config.supply_current_limit = ModuleConstants.kTurningMotorCurrentLimit
+            steer_current_config.supply_current_limit_enable = True
+            steer_current_config.stator_current_limit = ModuleConstants.kTurningStatorCurrentLimit
+            steer_current_config.stator_current_limit_enable = True
             module.steer_motor.configurator.apply(steer_current_config)
 
         # Requests

@@ -397,6 +397,27 @@ We are not debugging your licensing.
 
 ---
 
+## 🤖 AI Disclaimer
+
+Parts of this codebase were made with AI help.
+
+We use AI for:
+
+- Code comments
+- Text (docs, this README included)
+- Refactoring
+- Bug hunting
+- Commit messages
+
+A note on timing: the first versions of each codebase will have the heaviest AI use, because they get written right as the school year starts. The programmer forgets things over the break. The programmer isn't a dictionary or a robot. So the programmer gets AI help to write. Once the programmer remembers how everything works again, they'll lean on AI a lot less.
+
+AI can be wrong, sometimes with a lot of confidence. Treat its comments and fixes like anyone else's: read them, check them, and test on the robot.
+
+We know a lot of people are against AI, and we get it. We see it as a tool, and we use it to help us.
+If our AI use means you'd rather not take anything from this codebase, you're free to skip it, and we understand. That's exactly why this disclaimer is here.
+
+---
+
 # 🧪 Development Setup
 
 ## 1. Create a virtual environment

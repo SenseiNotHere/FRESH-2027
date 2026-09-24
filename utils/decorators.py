@@ -1,25 +1,30 @@
 from functools import wraps
-from wpilib import DriverStation, Timer
+from wpilib import DriverStation, Timer, reportWarning
 from pykit.logger import Logger
 
 
-class RobotState:
-    is_teleop = False
-
 def teleop_only(func):
-    """Prevents a function from being called outside of Teleop mode."""
-    key = f"Decorators/TeleopOnly/{func.__name__}"
+    """Prevents a function from being called outside of Teleop mode.
+
+    Warnings are rate-limited to one per second so a blocked
+    call inside a periodic loop doesn't flood the Driver Station log.
+    """
+    key = f"Decorators/TeleopOnly/{func.__qualname__}"
     blocked_count = 0
+    last_warn_time = float("-inf")
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        nonlocal blocked_count
+        nonlocal blocked_count, last_warn_time
         if not DriverStation.isTeleopEnabled():
             blocked_count += 1
             Logger.recordOutput(f"{key}/BlockedCount", blocked_count)
-            DriverStation.reportWarning(
-                f"Blocked {func.__name__} - cannot run outside of Teleop", False
-            )
+            now = Timer.getFPGATimestamp()
+            if now - last_warn_time >= 1.0:
+                last_warn_time = now
+                reportWarning(
+                    f"Blocked {func.__qualname__} - cannot run outside of Teleop", False
+                )
             return None
         return func(*args, **kwargs)
     return wrapper
@@ -27,8 +32,8 @@ def teleop_only(func):
 def throttle(cooldown_seconds):
     """Prevents a function from being called more than once every cooldown_seconds."""
     def decorator(func):
-        key = f"Decorators/Throttle/{func.__name__}"
-        last_called = 0.0
+        key = f"Decorators/Throttle/{func.__qualname__}"
+        last_called = float("-inf")
         throttled_count = 0
 
         @wraps(func)
@@ -52,7 +57,7 @@ def fail_safe(fallback_value=None, warn_interval_seconds=1.0):
     and health are still logged to pyKit every call.
     """
     def decorator(func):
-        key = f"Decorators/FailSafe/{func.__name__}"
+        key = f"Decorators/FailSafe/{func.__qualname__}"
         error_count = 0
         last_warn_time = float("-inf")
 
@@ -72,8 +77,8 @@ def fail_safe(fallback_value=None, warn_interval_seconds=1.0):
                 now = Timer.getFPGATimestamp()
                 if now - last_warn_time >= warn_interval_seconds:
                     last_warn_time = now
-                    DriverStation.reportWarning(
-                        f"[CRITICAL] {func.__name__} crashed! Error: {e}", True
+                    reportWarning(
+                        f"[CRITICAL] {func.__qualname__} crashed! Error: {e}", True
                     )
                 return fallback_value
         return wrapper
@@ -81,7 +86,7 @@ def fail_safe(fallback_value=None, warn_interval_seconds=1.0):
 
 def experimental(func):
     """Flags a method as risky/untested so the drive team knows what's up."""
-    key = f"Decorators/Experimental/{func.__name__}"
+    key = f"Decorators/Experimental/{func.__qualname__}"
     warned = False
 
     @wraps(func)
@@ -90,8 +95,8 @@ def experimental(func):
         Logger.recordOutput(f"{key}/Active", True)
         if not warned:
             warned = True
-            DriverStation.reportWarning(
-                f"Running EXPERIMENTAL method '{func.__name__}' - use with caution", False
+            reportWarning(
+                f"Running EXPERIMENTAL method '{func.__qualname__}' - use with caution", False
             )
         return func(*args, **kwargs)
     return wrapper

@@ -9,7 +9,7 @@ from wpimath.kinematics import ChassisSpeeds
 from wpimath.filter import SlewRateLimiter
 
 from phoenix6.hardware import TalonFX, CANcoder
-from phoenix6.configs import MotorOutputConfigs, CurrentLimitsConfigs
+from phoenix6.configs import TalonFXConfiguration
 
 from phoenix6.swerve import (
     SwerveDrivetrain,
@@ -118,31 +118,18 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain):
         )
 
         for module in self.modules:
-            drive_output_config = MotorOutputConfigs()
-            module.drive_motor.configurator.refresh(drive_output_config)
-            drive_output_config.neutral_mode = ModuleConstants.kDrivingMotorIdleMode
-            module.drive_motor.configurator.apply(drive_output_config)
-
-            steer_output_config = MotorOutputConfigs()
-            module.steer_motor.configurator.refresh(steer_output_config)
-            steer_output_config.neutral_mode = ModuleConstants.kTurningMotorIdleMode
-            module.steer_motor.configurator.apply(steer_output_config)
-
-            drive_current_config = CurrentLimitsConfigs()
-            module.drive_motor.configurator.refresh(drive_current_config)
-            drive_current_config.supply_current_limit = ModuleConstants.kDrivingMotorCurrentLimit
-            drive_current_config.supply_current_limit_enable = True
-            drive_current_config.stator_current_limit = ModuleConstants.kDrivingMotorStatorCurrentLimit
-            drive_current_config.stator_current_limit_enable = True
-            module.drive_motor.configurator.apply(drive_current_config)
-
-            steer_current_config = CurrentLimitsConfigs()
-            module.steer_motor.configurator.refresh(steer_current_config)
-            steer_current_config.supply_current_limit = ModuleConstants.kTurningMotorCurrentLimit
-            steer_current_config.supply_current_limit_enable = True
-            steer_current_config.stator_current_limit = ModuleConstants.kTurningStatorCurrentLimit
-            steer_current_config.stator_current_limit_enable = True
-            module.steer_motor.configurator.apply(steer_current_config)
+            self._configureMotor(
+                module.drive_motor,
+                ModuleConstants.kDrivingMotorIdleMode,
+                ModuleConstants.kDrivingMotorCurrentLimit,
+                ModuleConstants.kDrivingMotorStatorCurrentLimit
+            )
+            self._configureMotor(
+                module.steer_motor,
+                ModuleConstants.kTurningMotorIdleMode,
+                ModuleConstants.kTurningMotorCurrentLimit,
+                ModuleConstants.kTurningStatorCurrentLimit
+            )
 
         # Requests
         self.field_speeds_request = ApplyFieldSpeeds()
@@ -165,6 +152,19 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain):
 
         # Sim stuff
         self.last_speeds = ChassisSpeeds(0, 0, 0)
+
+    @staticmethod
+    def _configureMotor(motor: TalonFX, neutral_mode, supply_limit: float, stator_limit: float):
+        config = TalonFXConfiguration()
+        motor.configurator.refresh(config)
+
+        config.motor_output.neutral_mode = neutral_mode
+        config.current_limits.supply_current_limit = supply_limit
+        config.current_limits.supply_current_limit_enable = True
+        config.current_limits.stator_current_limit = stator_limit
+        config.current_limits.stator_current_limit_enable = True
+
+        motor.configurator.apply(config)
 
     # Periodic
     def periodic(self) -> None:

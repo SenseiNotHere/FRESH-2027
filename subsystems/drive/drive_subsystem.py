@@ -171,12 +171,16 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain):
         if self.alliance is None:
             self.getAlliance()
 
-        pose = self.get_state().pose
+        state = self.get_state()
+        pose = state.pose
         self.field.setRobotPose(pose)
-        
+
         SmartDashboard.putNumber("Drivetrain/X", pose.x)
         SmartDashboard.putNumber("Drivetrain/Y", pose.y)
         SmartDashboard.putNumber("Drivetrain/Heading", pose.rotation().degrees())
+
+        for name, module_state in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), state.module_states):
+            SmartDashboard.putNumber(f"Drivetrain/{name}/Angle", module_state.angle.degrees())
 
         # Drivetrain Calibration
         if CALIBRATING_DRIVETRAIN:

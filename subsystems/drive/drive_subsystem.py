@@ -24,7 +24,7 @@ from constants import SwerveConstants, ModuleConstants
 
 
 CALIBRATING_DRIVETRAIN = False
-class DriveSubsystem(Subsystem, SwerveDrivetrain):
+class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
     def __init__(self, maxSpeedScaleFactor):
         Subsystem.__init__(self)
 
@@ -179,8 +179,8 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain):
         SmartDashboard.putNumber("Drivetrain/Y", pose.y)
         SmartDashboard.putNumber("Drivetrain/Heading", pose.rotation().degrees())
 
-        for name, module_state in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), state.module_states):
-            SmartDashboard.putNumber(f"Drivetrain/{name}/Angle", module_state.angle.degrees())
+        for name, module in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), self.modules):
+            SmartDashboard.putNumber(f"Drivetrain/{name}/Position", module.encoder.get_absolute_position().value)
 
         # Drivetrain Calibration
         if CALIBRATING_DRIVETRAIN:

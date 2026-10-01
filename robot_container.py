@@ -5,6 +5,8 @@ import wpilib
 from commands2 import InstantCommand, Command
 from commands2.button import CommandGenericHID
 from wpilib import XboxController, SendableChooser, SmartDashboard
+from wpimath.geometry import Rotation2d, Translation3d
+from pathplannerlib.auto import AutoBuilder
 
 from pykit.logger import Logger
 from pykit.inputs.loggablepowerdistribution import LoggedPowerDistribution
@@ -18,6 +20,13 @@ from subsystems import (
     DriveSubsystem,
     AutonomousSubsystem,
     OrchestraSubsystem,
+    IntakeSubsystem,
+    ShooterSubsystem,
+    IndexerSubsystem,
+    AgitatorSubsystem,
+    ShotCalculator,
+    LimelightCamera,
+    LimelightLocalizer,
 )
 
 from button_bindings import ButtonBindings
@@ -47,8 +56,6 @@ class _RobotPowerDistribution(LoggedPowerDistribution):
         if not self._available:
             return
 
-        # Aggregate stats come from a single, always-present status frame; if these
-        # fail the device has genuinely dropped, so stop logging entirely.
         try:
             table.put("Voltage", self.distribution.getVoltage())
             table.put("TotalCurrent", self.distribution.getTotalCurrent())
@@ -62,8 +69,6 @@ class _RobotPowerDistribution(LoggedPowerDistribution):
         if not RobotConstants.kLogPDHChannels:
             return
 
-        # Per-channel currents arrive in separate frames that can be missing right
-        # after a reflash or on a firmware/REVLib mismatch; read best-effort.
         channelCurrents = []
         for channel in range(self.distribution.getNumChannels()):
             try:
@@ -93,11 +98,71 @@ class RobotContainer:
 
         self.drive_subsystem = DriveSubsystem(maxSpeedScaleFactor=slowdown_when)
         self.autonomous_subsystem = AutonomousSubsystem(self.drive_subsystem)
-        self.orchestra = OrchestraSubsystem(self.drive_subsystem)
+
+        self.intake_subsystem = IntakeSubsystem(
+            deployMotorCANID=IntakeConstants.kDeployMotorID,
+            deployMotorInverted=IntakeConstants.kDeployMotorInverted,
+            intakeMotorCANID=IntakeConstants.kRollerMotorID,
+            intakeMotorInverted=IntakeConstants.kRollerMotorInverted,
+        )
+
+        self.shooter_subsystem = ShooterSubsystem(
+            ShooterConstants.kShooterMotorID,
+            ShooterConstants.kShooterMotorInverted,
+        )
+        self.shooter2_subsystem = ShooterSubsystem(
+            ShooterConstants.kShooterMotor2ID,
+            ShooterConstants.kShooterMotor2Inverted,
+        )
+
+        self.agitator_subsystem = AgitatorSubsystem(
+            AgitatorConstants.kMotorCANID,
+            AgitatorConstants.kMotorInverted,
+        )
+
+        self.indexer_subsystem = IndexerSubsystem(
+            IndexerConstants.kIndexerMotorID,
+            IndexerConstants.kIndexerMotorInverted,
+        )
+
+        self.shot_calculator = ShotCalculator(self.drive_subsystem)
+
+        # Vision
+        self.front_limelight = LimelightCamera("limelight-front")
+        self.back_limelight = LimelightCamera("limelight-back")
+
+        self.localizer = LimelightLocalizer(drivetrain=self.drive_subsystem, flipIfRed=True)
+        self.localizer.addCamera(
+            camera=self.front_limelight,
+            cameraPoseOnRobot=Translation3d(-0.051, -0.241, 0.533),
+            cameraHeadingOnRobot=Rotation2d.fromDegrees(180),
+            minPercentFrame=0.07,
+            maxRotationSpeed=720,
+        )
+        self.localizer.addCamera(
+            camera=self.back_limelight,
+            cameraPoseOnRobot=Translation3d(0.305, 0.025, 0.459),
+            cameraHeadingOnRobot=Rotation2d.fromDegrees(0),
+            minPercentFrame=0.07,
+            maxRotationSpeed=720,
+        )
+
+        self.orchestra = OrchestraSubsystem(
+            self.drive_subsystem,
+            self.shooter_subsystem,
+            self.intake_subsystem,
+        )
 
         # Superstructure - MUST BE LAST TO INITIALIZE
         self.superstructure = Superstructure(
             drivetrain=self.drive_subsystem,
+            intake=self.intake_subsystem,
+            shooter=self.shooter_subsystem,
+            shooter2=self.shooter2_subsystem,
+            indexer=self.indexer_subsystem,
+            agitator=self.agitator_subsystem,
+            shotCalculator=self.shot_calculator,
+            vision=self.front_limelight,
             orchestra=self.orchestra,
             driverController=self.driver_controller,
             operatorController=self.operator_controller,
@@ -120,7 +185,8 @@ class RobotContainer:
         )
 
         # Auto and Test Choosers
-        self.auto_chooser = SendableChooser()
+        self.auto_chooser = AutoBuilder.buildAutoChooser()
+        SmartDashboard.putData("Auto Chooser", self.auto_chooser)
         self._lastPreviewedAuto = None
         self.test_chooser = SendableChooser()
 
@@ -140,15 +206,15 @@ class RobotContainer:
         selected = self.auto_chooser.getSelected()
 
         if selected != self._lastPreviewedAuto:
-            self.autonomous_subsystem.drawAuto(selected)
+            self.autonomous_subsystem.drawAuto(selected.getName() if selected is not None else "")
             self._lastPreviewedAuto = selected
     
     # Autonomous and Test Command Getters
-    def getAutonomousCommand(self) -> typing.Optional[InstantCommand]:
+    def getAutonomousCommand(self) -> typing.Optional[Command]:
         selected_auto = self.auto_chooser.getSelected()
         if selected_auto is not None:
-            log("Robot Container", f"Selected autonomous: {selected_auto.name}")
-            return selected_auto.command
+            log("Robot Container", f"Selected autonomous: {selected_auto.getName()}")
+            return selected_auto
         else:
             log("Robot Container", "No autonomous selected")
             return None

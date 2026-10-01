@@ -69,7 +69,7 @@ class RobotState(Enum):
     PLAYING_CHAMPIONSHIP_SONG = 2
 
     # Your new stuff
-    INTAKING = 3
+    ALIGNING_TO_TARGET = 60
 ```
 
 Name it after what the robot is doing, not which motor spins.
@@ -102,7 +102,7 @@ Add your state to the `_state_handlers` dictionary:
 self._state_handlers = {
     RobotState.IDLE: self._handle_idle,
     ...
-    RobotState.INTAKING: self._handle_intaking,
+    RobotState.ALIGNING_TO_TARGET: self._handle_aligning_to_target,
 }
 ```
 
@@ -114,22 +114,15 @@ A state with no entry here does nothing. No error, no warning, just vibes. Don't
 
 Open:
 
-    superstructure/superstructure_states.py
+    superstructure/superstructure.py
 
-Add a method to `SuperstructureStates`:
+Add a method under `# State handlers`. The existing intaking handler is a good model:
 
 ``` python
-def _handle_intaking(self: "Superstructure"): # type: ignore
-    if not self.hasIntake:
-        return
-
-    self.intake.deploy()
-    self.intake.runRollers()
+def _handle_intaking(self):
+    self._deploy_intake_pivot()
+    self._start_intake_rollers()
 ```
-
-(`hasIntake` and `intake` don't exist yet. Add the subsystem first, then its availability flag next to `hasOrchestra` in `superstructure.py`.)
-
-Keep the `self: "Superstructure"` type hint. Without it your editor can't see `self.drivetrain`, `self.orchestra`, or anything else, and autocomplete gives up on you.
 
 Handlers:
 
@@ -146,11 +139,9 @@ The handler runs every loop while the state is active, so write it to be safe to
 
 ## 4️⃣ Helpers
 
-Shared logic that more than one handler needs goes in:
+Shared logic that more than one handler needs goes below the handlers in `superstructure.py`, under `# Intake`, `# Shooter`, `# Feeders`, or `# Orchestra` or whatever other subsystem added.
 
-    superstructure/superstructure_helpers.py
-
-`_stop_orchestra()` and `_rumble_controller()` already live there. Copy their shape.
+`_stop_feeders()` and `_spin_up_shooters()` already live there. Copy their shape.
 
 ------------------------------------------------------------------------
 
@@ -168,16 +159,7 @@ class RobotReadiness:
     intakeDeployed: bool = False
 ```
 
-Then update it in `_update_readiness()` in `superstructure.py`. That method runs before every handler, so handlers always see fresh values.
-
-Want to use `setRobotReadiness()` / `getRobotReadiness()`? Add a matching entry to `ReadinessList`. The value has to be the exact field name, because that's what `setattr` looks up:
-
-``` python
-class ReadinessList(Enum):
-    INTAKE_DEPLOYED = "intakeDeployed"
-```
-
-Totally optional.
+Then update it in `_update_readiness()` in `superstructure.py`. That method runs before every handler, so handlers always see fresh values. Read it as `self.robot_readiness.intakeDeployed`.
 
 ------------------------------------------------------------------------
 
@@ -191,7 +173,7 @@ self.driverController.button(XboxController.Button.kA).whileTrue(
 )
 ```
 
-`createStateCommand` sets the state when the command starts and drops back to `IDLE` when it ends, as long as nothing else changed the state in between. Hold the button, the robot intakes. Let go, she stops.
+`createStateCommand` sets the state when the command starts and drops back to `IDLE` when it ends, as long as nothing else changed the state in between. `PREP_SHOT` moving on to `SHOOTING` by itself doesn't count as a change, so releasing the button still stops the shot. Hold the button, the robot intakes. Let go, she stops.
 
 For autonomous, use `autoCreateStateCommand`. It sets the state and finishes right away so the path keeps moving:
 
@@ -500,11 +482,9 @@ Hi. If you're reading this, you care enough to build it right. We appreciate you
 - `subsystems/`: hardware logic (currently `drive/` and `orchestra/`)
 - `commands/`: behaviors, grouped by subsystem
 - `superstructure/`: robot intent
-    - `superstructure.py`: the state machine and its public API
-    - `superstructure_states.py`: one handler per state
-    - `superstructure_helpers.py`: shared helper methods
-    - `robot_state.py`: `RobotState`, `RobotReadiness`, `ReadinessList`
-    - `auxiliary_actions.py`: side actions that run outside the state machine (empty for now)
+    - `superstructure.py`: the state machine, its public API, one handler per state, and shared helpers
+    - `robot_state.py`: `RobotState` and `RobotReadiness`
+    - `auxiliary_actions.py`: side actions that run outside the state machine (right now: the teleop shift notifier, which rumbles the driver 5 seconds before each shift change)
 - `constants/`: every tunable number
 - `deploy/`: PathPlanner files and songs
 - `utils/`: decorators, `InterpolatingMap`, logging helpers

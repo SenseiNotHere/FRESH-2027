@@ -207,6 +207,10 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         """
         return self.get_state().pose.rotation()
 
+    def getTurnRate(self) -> float:
+        """Degrees per second, counterclockwise positive."""
+        return math.degrees(self.get_state().speeds.omega)
+
     def setX(self):
         """
         Sets the robot into X-Break positon.

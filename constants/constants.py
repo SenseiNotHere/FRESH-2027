@@ -226,7 +226,7 @@ class IntakeConstants:
     kIntakeD = 0.0
     kIntakeFF = 0.112
 
-    kIntakeSpeed = 1200
+    kIntakeSpeed = 100  # rps at 100% on the chooser
     kIntakePulseSpeed = 30
 class IndexerConstants:
 

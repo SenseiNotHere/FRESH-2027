@@ -1,3 +1,4 @@
+import os
 import typing
 from commands2 import CommandScheduler, Command
 from pykit.loggedrobot import LoggedRobot
@@ -24,11 +25,10 @@ class FRCRobot(LoggedRobot):
             case RobotModes.SIM:
                 Logger.addDataReciever(NT4Publisher(True))
             case RobotModes.REPLAY:
-                Logger.setUseTiming(False)
-                # logPath = LogFileUtil.findReplayLog()
-                # Logger.setReplaySource(WPILOGReader(logPath))
-                # Logger.addDataReciever(WPILOGWriter(logPath + "_sim"))
-                pass
+                self.useTiming = False
+                log_path = os.environ["LOG_PATH"]
+                Logger.setReplaySource(WPILOGReader(log_path))
+                Logger.addDataReciever(WPILOGWriter(log_path.removesuffix(".wpilog") + "_sim.wpilog"))
 
         Logger.start()
 

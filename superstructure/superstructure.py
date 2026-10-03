@@ -127,24 +127,30 @@ class Superstructure:
         self.auxiliary_actions.update()
 
     def _update_readiness(self):
+        # Shooter is ready when every shooter we have is at speed
         shooters = self._shooters()
-        shooter_ready = bool(shooters) and all(s.atSpeed(tolerance_rpm=50) for s in shooters)
-        self.robot_readiness.shooterReady = shooter_ready
+        shooter_ready = len(shooters) > 0
+        for shooter in shooters:
+            if not shooter.atSpeed(tolerance_rpm=50):
+                shooter_ready = False
 
-        # 0.12s debounce so one at-speed sample doesn't start feeding
+        # Only feed once the shooter has stayed ready for 0.12s,
+        # so one lucky at-speed sample doesn't start feeding
         now = Timer.getFPGATimestamp()
-        if shooter_ready:
-            if self._can_feed_since is None:
-                self._can_feed_since = now
-            can_feed = (now - self._can_feed_since) >= 0.12
-        else:
+        if not shooter_ready:
             self._can_feed_since = None
-            can_feed = False
-        self.robot_readiness.canFeed = can_feed
+        elif self._can_feed_since is None:
+            self._can_feed_since = now
+
+        can_feed = self._can_feed_since is not None and now - self._can_feed_since >= 0.12
 
         intake_deployed = self.intake is not None and self.intake.is_deployed()
+
+        self.robot_readiness.shooterReady = shooter_ready
+        self.robot_readiness.canFeed = can_feed
         self.robot_readiness.intakeDeployed = intake_deployed
 
+        # Logging
         if self.shooter is not None:
             Logger.recordOutput("Superstructure/Shooter1/CurrentRPS", self.shooter.getCurrentRPS())
             Logger.recordOutput("Superstructure/Shooter1/TargetRPS", self.shooter.getTargetRPS())

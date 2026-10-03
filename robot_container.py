@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typing
+from types import SimpleNamespace
 import wpilib
 from commands2 import InstantCommand, Command
 from commands2.button import CommandGenericHID
@@ -34,52 +35,6 @@ from button_bindings import ButtonBindings
 from utils import log, print_banner
 
 
-class _RobotPowerDistribution(LoggedPowerDistribution):
-    """
-    pykit's Logger logs the PDH every loop via LoggedPowerDistribution.getInstance(),
-    which otherwise hardcodes a REV module at CAN ID 1 and ignores our config. We seed
-    the singleton with this subclass so the logger uses our CAN ID/type, skip the
-    hardware entirely in simulation, and log defensively so an unresponsive device or a
-    missing per-channel current frame can't stop logging or crash the loop.
-
-    Note: WPILib reports CAN read failures as printed HAL warnings, not Python
-    exceptions, so try/except can't silence them. To stop persistent per-channel
-    "CAN: Message not Found" spam, set RobotConstants.kLogPDHChannels = False.
-    """
-
-    def __init__(self, moduleId: int, moduleType: wpilib.PowerDistribution.ModuleType):
-        self._available = wpilib.RobotBase.isReal() and RobotConstants.kEnablePDHLogging
-        if self._available:
-            super().__init__(moduleId, moduleType)
-
-    def saveToTable(self, table):
-        if not self._available:
-            return
-
-        try:
-            table.put("Voltage", self.distribution.getVoltage())
-            table.put("TotalCurrent", self.distribution.getTotalCurrent())
-            table.put("TotalPower", self.distribution.getTotalPower())
-            table.put("TotalEnergy", self.distribution.getTotalEnergy())
-            table.put("Temperature", self.distribution.getTemperature())
-        except Exception:
-            self._available = False
-            return
-
-        if not RobotConstants.kLogPDHChannels:
-            return
-
-        channelCurrents = []
-        for channel in range(self.distribution.getNumChannels()):
-            try:
-                channelCurrents.append(self.distribution.getCurrent(channel))
-            except Exception:
-                channelCurrents.append(0.0)
-
-        table.put("ChannelCurrentsList", channelCurrents)
-        table.put("ChannelCurrentsTotal", sum(channelCurrents))
-
-
 class RobotContainer:
     def __init__(self):
         print_banner("INITIALIZING ROBOT CONTAINER")
@@ -88,9 +43,14 @@ class RobotContainer:
         self.driver_controller = CommandGenericHID(OIConstants.kDriverControllerPort)
         self.operator_controller = CommandGenericHID(OIConstants.kOperatorControllerPort)
 
-        LoggedPowerDistribution.instance = _RobotPowerDistribution(
-            RobotConstants.kPDHCanID, wpilib.PowerDistribution.ModuleType.kRev
-        )
+        # pykit's Logger always calls LoggedPowerDistribution.getInstance().saveToTable();
+        # seed a no-op when disabled so it never touches the PDH.
+        if RobotConstants.kLogPDH:
+            LoggedPowerDistribution.instance = LoggedPowerDistribution(
+                RobotConstants.kPDHCanID, wpilib.PowerDistribution.ModuleType.kRev
+            )
+        else:
+            LoggedPowerDistribution.instance = SimpleNamespace(saveToTable=lambda table: None)  # type: ignore[assignment]
 
         # Subsystems
         def slowdown_when():

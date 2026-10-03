@@ -288,7 +288,7 @@ Logging runs through pykit.
 - Simulation: publishes to NetworkTables only
 - Replay: set up, not implemented yet
 
-The PDH gets logged too. If the console fills up with `CAN: Message not Found`, set `RobotConstants.kLogPDHChannels = False`. To turn PDH logging off completely, set `kEnablePDHLogging = False`.
+The PDH gets logged too. To turn PDH logging off (e.g. if the console fills up with `CAN: Message not Found`), set `RobotConstants.kLogPDH = False`.
 
 ---
 

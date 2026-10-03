@@ -1,5 +1,6 @@
 from enum import Enum
 import math
+import os
 
 import wpilib
 from wpimath import units
@@ -180,6 +181,7 @@ class ShooterConstants:
     kShooterSupplyLimit = 40
     kShooterStatorLimit = 80
 
+    # (Meters, RPS)
     DISTANCE_TO_RPS = InterpolatingMap()
     DISTANCE_TO_RPS.insert(1.0, 48.75) # minimum distance
     DISTANCE_TO_RPS.insert(2.0, 51.75)
@@ -256,9 +258,11 @@ class RobotModes(Enum):
 class RobotConstants:
     kPDHCanID = 1
 
-    kEnablePDHLogging = True
-    kLogPDHChannels = True
+    kLogPDH = False
 
+    # Set LOG_PATH to a .wpilog to run sim as a replay of that log.
     kRobotMode: RobotModes = (
-        RobotModes.REAL if wpilib.RobotBase.isReal() else RobotModes.SIM
+        RobotModes.REAL if wpilib.RobotBase.isReal()
+        else RobotModes.REPLAY if os.environ.get("LOG_PATH")
+        else RobotModes.SIM
     )

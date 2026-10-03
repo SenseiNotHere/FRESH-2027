@@ -1,0 +1,4 @@
+$env:LOG_PATH='C:\path\to\log.wpilog'
+robotpy sim
+# when done, so normal sim goes back to SIM mode:
+Remove-Item Env:LOG_PATH

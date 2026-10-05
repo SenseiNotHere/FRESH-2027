@@ -128,6 +128,10 @@ class RobotContainer:
             operatorController=self.operator_controller,
         )
 
+        # PathPlanner commands need the superstructure, and must exist before the auto chooser loads autos
+        self.autonomous_subsystem.registerNamedCommands(self.superstructure)
+        self.autonomous_subsystem.registerEventTriggers(self.superstructure)
+
         # Button bindings
         self.button_bindings = ButtonBindings(self, self.superstructure, self.driver_controller, self.operator_controller)
         self.button_bindings.configureButtonBindings()

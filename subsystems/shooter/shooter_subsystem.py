@@ -8,6 +8,7 @@ from phoenix6.configs import (
     CurrentLimitsConfigs,
 )
 from phoenix6.signals import NeutralModeValue, InvertedValue
+from phoenix6.sim import ChassisReference
 
 from wpilib import SmartDashboard, SendableChooser
 
@@ -45,6 +46,12 @@ class ShooterSubsystem(Subsystem):
             else InvertedValue.CLOCKWISE_POSITIVE
         )
         self.motor.configurator.apply(motorConfig)
+        # Sim reports velocity in the same direction the real motor is configured for
+        self.motor.sim_state.orientation = (
+            ChassisReference.COUNTER_CLOCKWISE_POSITIVE
+            if motorInverted
+            else ChassisReference.CLOCKWISE_POSITIVE
+        )
 
         slot0 = Slot0Configs()
         (

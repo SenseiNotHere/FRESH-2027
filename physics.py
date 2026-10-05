@@ -9,10 +9,17 @@ class PhysicsEngine:
         self.heading = Rotation2d()
 
     def update_sim(self, now: float, tm_diff: float) -> None:
+        container = self.robot.robot_container
+
+        # No flywheel model: shooters instantly read back the speed they're asked for
+        for shooter in (container.shooter_subsystem, container.shooter2_subsystem):
+            target = shooter.getTargetRPS() if self.robot.isEnabled() else 0.0
+            shooter.motor.sim_state.set_rotor_velocity(target)
+
         if not self.robot.isEnabled():
             return
 
-        drivetrain = self.robot.robot_container.drive_subsystem
+        drivetrain = container.drive_subsystem
         speeds = drivetrain.last_speeds
 
         self.heading = self.heading + Rotation2d(speeds.omega * tm_diff)

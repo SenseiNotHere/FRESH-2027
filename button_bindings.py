@@ -3,6 +3,7 @@ from commands2 import RunCommand
 from commands2.button import CommandGenericHID
 
 from commands import ResetSwerveFront, ResetXY
+from superstructure import IntakeState, ScoringState
 
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,7 @@ class ButtonBindings:
 
     def configureButtonBindings(self):
         self._configureDriverBindings()
+        self._configureOperatorBindings()
 
     def _configureDriverBindings(self):
                 # Reset Controls
@@ -76,3 +78,43 @@ class ButtonBindings:
             RunCommand(self.robotContainer.drive_subsystem.setX, self.robotContainer.drive_subsystem)
         )
 
+        # Right Trigger = Prep Shot, moves to SHOOTING on its own once the shooters are at speed
+        self.driverController.axisGreaterThan(
+            XboxController.Axis.kRightTrigger, 0.1
+        ).whileTrue(
+            self.superstructure.createStateCommand(ScoringState.PREP_SHOT)
+        )
+
+        # Y = Agitator Opposite
+        self.driverController.button(
+            XboxController.Button.kY
+        ).whileTrue(
+            self.superstructure.createStateCommand(ScoringState.AGITATOR_OPPOSITE)
+        )
+
+    def _configureOperatorBindings(self):
+        # Right Trigger = Intake
+        self.operatorController.axisGreaterThan(
+            XboxController.Axis.kRightTrigger, 0.05
+        ).whileTrue(
+            self.superstructure.createStateCommand(IntakeState.INTAKING)
+        )
+
+        # Left Trigger = Reverse Intake
+        self.operatorController.axisGreaterThan(
+            XboxController.Axis.kLeftTrigger, 0.05
+        ).whileTrue(
+            self.superstructure.createStateCommand(IntakeState.REVERSE)
+        )
+
+        # Left Bumper = Stow, Right Bumper = Deploy (latched until another state)
+        self.operatorController.button(
+            XboxController.Button.kLeftBumper
+        ).onTrue(
+            self.superstructure.autoCreateStateCommand(IntakeState.STOWED)
+        )
+        self.operatorController.button(
+            XboxController.Button.kRightBumper
+        ).onTrue(
+            self.superstructure.autoCreateStateCommand(IntakeState.DEPLOYED)
+        )

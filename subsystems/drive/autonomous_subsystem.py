@@ -32,10 +32,6 @@ class AutonomousSubsystem(Subsystem):
 
         self.drivetrain = drivetrain
 
-        # Register commands and event triggers
-        self.registerNamedCommands()
-        self.registerEventTriggers()
-
         AutoBuilder.configure(
             self._getPose,
             self._resetOdometry,
@@ -50,11 +46,24 @@ class AutonomousSubsystem(Subsystem):
             self.drivetrain
         )
 
-    def registerNamedCommands(self):
-        pass
+    def registerNamedCommands(self, superstructure):
+        """Call after the Superstructure exists and before AutoBuilder.buildAutoChooser()."""
+        # Imported here: superstructure imports subsystems, so a top-level import would be circular
+        from superstructure import IntakeState, ScoringState
 
-    def registerEventTriggers(self):
-        pass
+        NamedCommands.registerCommand(
+            'DEPLOY_INTAKE', superstructure.autoCreateStateCommand(IntakeState.DEPLOYED))
+        NamedCommands.registerCommand(
+            'POINT_AND_SHOOT', superstructure.createStateCommand(ScoringState.PREP_SHOT).withTimeout(6.0))
+        NamedCommands.registerCommand(
+            'PREP_SHOT_DS2', superstructure.createStateCommand(ScoringState.PREP_SHOT).withTimeout(8.0))
+
+    def registerEventTriggers(self, superstructure):
+        from superstructure import IntakeState
+
+        EventTrigger('DEPLOY_INTAKE').onTrue(superstructure.autoCreateStateCommand(IntakeState.DEPLOYED))
+        EventTrigger('INTAKING').whileTrue(superstructure.createStateCommand(IntakeState.INTAKING))
+        EventTrigger('INTAKING_DS2_NEUTRAL').whileTrue(superstructure.createStateCommand(IntakeState.INTAKING))
 
     def _driveRobotRelative(self, speeds, feedforwards):
         self.drivetrain.driveRobotRelativeChassisSpeeds(

@@ -1,6 +1,9 @@
+from enum import Enum
+
 from commands2 import InstantCommand, StartEndCommand
 from commands2.button import CommandGenericHID
-from wpilib import Timer, SendableChooser, SmartDashboard
+from wpilib import DriverStation, Timer, SendableChooser, SmartDashboard
+from wpimath.filter import Debouncer
 from pykit.logger import Logger
 
 from subsystems import (
@@ -14,22 +17,34 @@ from subsystems import (
     OrchestraSubsystem,
 )
 
-from .robot_state import RobotState, RobotReadiness
+from .robot_state import MusicState, IntakeState, ScoringState
 from .auxiliary_actions import AuxiliaryActions
 
 from utils import log
 
-# States that advance on their own once ready
-NEXT_STATE = {
-    RobotState.PREP_SHOT: RobotState.SHOOTING,
-    RobotState.PREP_SHOT_AUTONOMOUS: RobotState.SHOOTING_AUTONOMOUS,
+# State enum -> attribute holding it. Logged under Superstructure/<EnumName>/.
+STATE_VARIABLES = {
+    MusicState: "music_state",
+    IntakeState: "intake_state",
+    ScoringState: "scoring_state",
 }
+
+# States that hand off to a partner state on their own. A command holding either one
+# still counts as holding its state, so releasing the button returns to IDLE.
+LINKED_STATES = {
+    ScoringState.PREP_SHOT: ScoringState.SHOOTING,
+}
+
+# Reset to IDLE whenever the robot is disabled, so nothing latched in auto carries into teleop.
+# Music is left alone so songs can play while disabled.
+RESET_ON_DISABLE = (IntakeState, ScoringState)
 
 
 class Superstructure:
     """
-    Owns the robot-wide RobotState and runs the matching subsystem logic each loop,
-    so subsystems never command each other directly. Every subsystem is optional.
+    Owns one state variable per enum in STATE_VARIABLES and runs each one's
+    handler every loop, so subsystems never command each other directly.
+    Every subsystem is optional.
 
     Single instance: construct once, then use Superstructure.getInstance().
     """
@@ -67,34 +82,37 @@ class Superstructure:
         self.driverController = driverController
         self.operatorController = operatorController
 
-
-        self.robot_state = RobotState.IDLE
-        self.robot_readiness = RobotReadiness()
+        self.music_state = MusicState.IDLE
+        self.intake_state = IntakeState.IDLE
+        self.scoring_state = ScoringState.IDLE
 
         # Called every loop while in the given state
         self._state_handlers = {
-            RobotState.IDLE: self._handle_idle,
+            MusicState.IDLE: self._handle_music_idle,
+            MusicState.PLAYING_SONG: self._handle_playing_song,
+            MusicState.PLAYING_CHAMPIONSHIP_SONG: self._handle_playing_championship_song,
 
-            RobotState.INTAKING: self._handle_intaking,
-            RobotState.INTAKING_AUTONOMOUS: self._handle_intaking,
-            RobotState.INTAKE_DEPLOYED: self._handle_intake_deployed,
-            RobotState.INTAKE_STOWED: self._handle_intake_stowed,
-            RobotState.INTAKE_REVERSE: self._handle_intake_reverse,
+            IntakeState.IDLE: self._handle_intake_idle,
+            IntakeState.DEPLOYED: self._handle_intake_deployed,
+            IntakeState.STOWED: self._handle_intake_stowed,
+            IntakeState.INTAKING: self._handle_intaking,
+            IntakeState.REVERSE: self._handle_intake_reverse,
 
-            RobotState.PREP_SHOT: self._handle_prep_shot,
-            RobotState.PREP_SHOT_AUTONOMOUS: self._handle_prep_shot,
-            RobotState.SHOOTING: self._handle_shooting,
-            RobotState.SHOOTING_AUTONOMOUS: self._handle_shooting,
-
-            RobotState.PASSING_FUEL: self._handle_passing_fuel,
-            RobotState.AGITATOR_OPPOSITE: self._handle_agitator_reverse,
-
-            RobotState.PLAYING_SONG: self._handle_playing_song,
-            RobotState.PLAYING_CHAMPIONSHIP_SONG: self._handle_playing_championship_song,
+            ScoringState.IDLE: self._handle_scoring_idle,
+            ScoringState.PREP_SHOT: self._handle_prep_shot,
+            ScoringState.SHOOTING: self._handle_shooting,
+            ScoringState.PASSING_FUEL: self._handle_passing_fuel,
+            ScoringState.AGITATOR_OPPOSITE: self._handle_agitator_reverse,
         }
 
-        self._can_feed_since: float | None = None
-        self._state_start_time = Timer.getFPGATimestamp()
+        now = Timer.getFPGATimestamp()
+        self._state_start_time = {enum: now for enum in STATE_VARIABLES}
+
+        # Feeding starts once the shooter has been at speed for 0.1s and only stops after
+        # it has been off speed for 0.1s, so neither a lucky sample nor each ball's RPM dip flips it
+        self._feed_debouncer = Debouncer(0.1, Debouncer.DebounceType.kBoth)
+        self.shooterReady = False
+        self.canFeed = False
 
         self.auxiliary_actions = AuxiliaryActions(self.driverController)
 
@@ -113,42 +131,79 @@ class Superstructure:
 
     def update(self):
         """Call from robotPeriodic()."""
-        Logger.recordOutput("Superstructure/State", self.robot_state.name)
-        Logger.recordOutput("Superstructure/StateValue", self.robot_state.value)
-        Logger.recordOutput("Superstructure/TimeInState", Timer.getFPGATimestamp() - self._state_start_time)
+        if DriverStation.isDisabled():
+            for enum in RESET_ON_DISABLE:
+                self.setState(enum.IDLE)
 
         self._update_readiness()
 
-        handler = self._state_handlers.get(self.robot_state)
-        if handler:
-            handler()
+        now = Timer.getFPGATimestamp()
+        for enum in STATE_VARIABLES:
+            state = self.getState(enum)
+            Logger.recordOutput(f"Superstructure/{enum.__name__}/State", state.name)
+            Logger.recordOutput(f"Superstructure/{enum.__name__}/TimeInState", now - self._state_start_time[enum])
+            SmartDashboard.putString(f"Superstructure/{enum.__name__}/State", state.name)
+            SmartDashboard.putNumber(f"Superstructure/{enum.__name__}/TimeInState", now - self._state_start_time[enum])
+            self._state_handlers[state]()
 
-        self._handle_music_cleanup()
         self.auxiliary_actions.update()
+
+    def createStateCommand(self, state: Enum):
+        """Holds `state` while scheduled, then returns its variable to IDLE unless another command has taken over."""
+        def on_end():
+            if self.getState(type(state)) in (state, LINKED_STATES.get(state)):
+                self.setState(type(state).IDLE)
+
+        return StartEndCommand(lambda: self.setState(state), on_end)
+
+    def autoCreateStateCommand(self, state: Enum):
+        """Sets `state` and leaves it there until something else changes that variable."""
+        return InstantCommand(lambda: self.setState(state))
+
+    def getState(self, enum: type[Enum]) -> Enum:
+        return getattr(self, STATE_VARIABLES[enum])
+
+    def setState(self, newState: Enum, force: bool = False):
+        """
+        Sets the variable `newState` belongs to; the other variables are untouched.
+
+        :param force: Re-enter the state even if it's already active (resets its timer).
+        """
+        enum = type(newState)
+        oldState = self.getState(enum)
+        if not force and newState == oldState:
+            return
+
+        setattr(self, STATE_VARIABLES[enum], newState)
+        self._state_start_time[enum] = Timer.getFPGATimestamp()
+
+        log("Superstructure", f"{enum.__name__}: {oldState.name} -> {newState.name}")
+        Logger.recordOutput(f"Superstructure/{enum.__name__}/LastTransition", f"{oldState.name} -> {newState.name}")
+
+    def _time_in_state(self, enum: type[Enum]) -> float:
+        return Timer.getFPGATimestamp() - self._state_start_time[enum]
+
+    # Music
+
+    def _handle_music_idle(self):
+        if self.orchestra is not None:
+            self.orchestra.stop()
+
+    def _handle_playing_song(self):
+        if self.orchestra is not None:
+            self.orchestra.play_selected_song()
+
+    def _handle_playing_championship_song(self):
+        if self.orchestra is not None:
+            self.orchestra.play_championship_song()
+
+    # Readiness
 
     def _update_readiness(self):
         # Shooter is ready when every shooter we have is at speed
         shooters = self._shooters()
-        shooter_ready = len(shooters) > 0
-        for shooter in shooters:
-            if not shooter.atSpeed(tolerance_rpm=50):
-                shooter_ready = False
-
-        # Only feed once the shooter has stayed ready for 0.12s,
-        # so one lucky at-speed sample doesn't start feeding
-        now = Timer.getFPGATimestamp()
-        if not shooter_ready:
-            self._can_feed_since = None
-        elif self._can_feed_since is None:
-            self._can_feed_since = now
-
-        can_feed = self._can_feed_since is not None and now - self._can_feed_since >= 0.12
-
-        intake_deployed = self.intake is not None and self.intake.is_deployed()
-
-        self.robot_readiness.shooterReady = shooter_ready
-        self.robot_readiness.canFeed = can_feed
-        self.robot_readiness.intakeDeployed = intake_deployed
+        self.shooterReady = len(shooters) > 0 and all(s.atSpeed(tolerance_rpm=50) for s in shooters)
+        self.canFeed = self._feed_debouncer.calculate(self.shooterReady)
 
         # Logging
         if self.shooter is not None:
@@ -161,47 +216,17 @@ class Superstructure:
             Logger.recordOutput("Superstructure/ShotCalc/TargetRPS", self.shotCalculator.getTargetSpeedRPS())
             Logger.recordOutput("Superstructure/ShotCalc/Distance", self.shotCalculator.getTargetDistance())
 
-        Logger.recordOutput("Superstructure/Readiness/ShooterReady", shooter_ready)
-        Logger.recordOutput("Superstructure/Readiness/CanFeed", can_feed)
-        Logger.recordOutput("Superstructure/Readiness/IntakeDeployed", intake_deployed)
+        Logger.recordOutput("Superstructure/Readiness/ShooterReady", self.shooterReady)
+        Logger.recordOutput("Superstructure/Readiness/CanFeed", self.canFeed)
 
-    def createStateCommand(self, state: RobotState):
-        """Holds `state` while scheduled, then returns to IDLE unless another command has taken over."""
-        def on_end():
-            if self.robot_state in (state, NEXT_STATE.get(state)):
-                self.setState(RobotState.IDLE)
+    # Intake handlers
 
-        return StartEndCommand(lambda: self.setState(state), on_end)
-
-    def autoCreateStateCommand(self, state: RobotState):
-        return InstantCommand(lambda: self.setState(state))
-
-    def setState(self, newState: RobotState, force: bool = False):
-        """
-        :param force: Re-enter the state even if it's already active (resets timers).
-        """
-        if not force and newState == self.robot_state:
-            return
-
-        oldState = self.robot_state
-        self.robot_state = newState
-        self._state_start_time = Timer.getFPGATimestamp()
-        self._can_feed_since = None
-
-        log("Superstructure", f"{oldState.name} -> {newState.name}")
-        Logger.recordOutput("Superstructure/LastTransition", f"{oldState.name} -> {newState.name}")
-        Logger.recordOutput("Superstructure/TransitionTimestamp", self._state_start_time)
-
-    def getState(self) -> RobotState:
-        return self.robot_state
-
-    # State handlers
-
-    def _handle_idle(self):
-        # Pivot holds its last position; only velocity mechanisms stop
-        self._stop_shooter()
-        self._stop_feeders()
-        self._stop_intake_rollers()
+    def _handle_intake_idle(self):
+        # Nobody is using the intake, so shooting may pulse it. Pivot otherwise holds its last position.
+        if self.scoring_state == ScoringState.SHOOTING:
+            self._pulse_intake()
+        else:
+            self._stop_intake_rollers()
 
     def _handle_intaking(self):
         self._deploy_intake_pivot()
@@ -219,35 +244,31 @@ class Superstructure:
         self._stow_intake_pivot()
         self._stop_intake_rollers()
 
+    # Scoring handlers
+
+    def _handle_scoring_idle(self):
+        self._stop_shooter()
+        self._stop_feeders()
+
     def _handle_prep_shot(self):
+        # Give the shooters time to reach the shot calculator's speed before any fuel goes in
         self._spin_up_shooters()
         self._stop_feeders()
-        if self.robot_readiness.canFeed:
-            self.setState(NEXT_STATE[self.robot_state])
+        if self.canFeed:
+            self.setState(ScoringState.SHOOTING)
 
     def _handle_shooting(self):
+        # Feeds until released; once at speed, losing RPM mid-volley doesn't matter
         self._spin_up_shooters()
-        self._pulse_intake()
         self._feed_shooters()
 
     def _handle_passing_fuel(self):
         self._spin_up_shooters_dashboard()
-        if self.robot_readiness.shooterReady:
-            self._feed_shooters()
-        else:
-            self._stop_feeders()
+        self._feed_when_ready()
 
     def _handle_agitator_reverse(self):
         if self.agitator is not None:
             self.agitator.reverse()
-
-    def _handle_playing_song(self):
-        if self.orchestra is not None:
-            self.orchestra.play_selected_song()
-
-    def _handle_playing_championship_song(self):
-        if self.orchestra is not None:
-            self.orchestra.play_championship_song()
 
     # Intake
 
@@ -275,8 +296,7 @@ class Superstructure:
         """Alternate pulse position (rollers on) and deploy position (rollers off) every 1.5s."""
         if self.intake is None:
             return
-        t = Timer.getFPGATimestamp() - self._state_start_time
-        if (t % 3.0) > 1.5:
+        if (self._time_in_state(ScoringState) % 3.0) > 1.5:
             self.intake.go_to_pulse_position()
             self.intake.intake()
         else:
@@ -308,6 +328,13 @@ class Superstructure:
 
     # Feeders
 
+    def _feed_when_ready(self):
+        """Checked every loop, so feeding stops if the shooter falls off speed."""
+        if self.canFeed:
+            self._feed_shooters()
+        else:
+            self._stop_feeders()
+
     def _feed_shooters(self):
         if self.indexer is not None:
             self.indexer.feed()
@@ -319,11 +346,3 @@ class Superstructure:
             self.indexer.stop()
         if self.agitator is not None:
             self.agitator.stop()
-
-    # Orchestra
-
-    def _handle_music_cleanup(self):
-        if self.orchestra is not None and self.robot_state not in (
-            RobotState.PLAYING_SONG, RobotState.PLAYING_CHAMPIONSHIP_SONG
-        ):
-            self.orchestra.stop()

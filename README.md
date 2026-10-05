@@ -29,7 +29,17 @@ Buttons don't talk to motors here.
 
 Buttons ask for a state. The superstructure reads that state every loop and tells the subsystems what to do.
 
-A state describes what the robot is trying to do: `IDLE`, `PLAYING_SONG`, and later whatever this game asks of us. One handler per state. One place to look when something acts weird.
+A state describes what the robot is trying to do: `INTAKING`, `PREP_SHOT`, `PLAYING_SONG`. One handler per state. One place to look when something acts weird.
+
+The robot does several things at once, so there's one state variable per job, each with its own enum in `superstructure/robot_state.py`:
+
+| Enum | Who uses it | Example states |
+|---|---|---|
+| `MusicState` | anyone | `PLAYING_SONG` |
+| `IntakeState` | operator | `INTAKING`, `DEPLOYED` |
+| `ScoringState` | driver | `PREP_SHOT`, `SHOOTING` |
+
+Setting one never touches the others. The operator can intake while the driver shoots, and the driver letting go of the trigger doesn't stop the intake.
 
 Teleop and auto set the same states, so they run the same code.
 If auto works, teleop works. If one breaks, they both break, and you only fix it once.
@@ -38,7 +48,9 @@ The loop, every 20 ms:
 
 1. `robotPeriodic()` runs the command scheduler
 2. `Superstructure.update()` refreshes readiness
-3. The handler for the current state runs
+3. The handler for each enum's current state runs
+
+When the robot is disabled, `IntakeState` and `ScoringState` reset to `IDLE` so nothing latched in auto carries into teleop. Music keeps playing.
 
 That's the whole trick.
 
@@ -58,19 +70,17 @@ Open:
 
     superstructure/robot_state.py
 
-Add a value to `RobotState`:
+Add a value to the enum for the job it belongs to:
 
 ``` python
-class RobotState(Enum):
-
-    # General
+class ScoringState(Enum):
     IDLE = 0
-    PLAYING_SONG = 1
-    PLAYING_CHAMPIONSHIP_SONG = 2
-
-    # Your new stuff
-    ALIGNING_TO_TARGET = 60
+    PREP_SHOT = 1
+    ...
+    ALIGNING_TO_TARGET = 5
 ```
+
+New job that should run alongside the others (a climber, say)? Make a new enum with an `IDLE`, then add it to `STATE_VARIABLES` in `superstructure.py` and give the Superstructure a `climber_state = ClimberState.IDLE`.
 
 Name it after what the robot is doing, not which motor spins.
 
@@ -100,13 +110,13 @@ Add your state to the `_state_handlers` dictionary:
 
 ``` python
 self._state_handlers = {
-    RobotState.IDLE: self._handle_idle,
+    ScoringState.IDLE: self._handle_scoring_idle,
     ...
-    RobotState.ALIGNING_TO_TARGET: self._handle_aligning_to_target,
+    ScoringState.ALIGNING_TO_TARGET: self._handle_aligning_to_target,
 }
 ```
 
-A state with no entry here does nothing. No error, no warning, just vibes. Don't forget this step.
+A state with no entry here crashes the robot loop with a `KeyError`. Don't forget this step.
 
 ------------------------------------------------------------------------
 
@@ -116,7 +126,7 @@ Open:
 
     superstructure/superstructure.py
 
-Add a method under `# State handlers`. The existing intaking handler is a good model:
+Add a method next to the other handlers for that enum. The existing intaking handler is a good model:
 
 ``` python
 def _handle_intaking(self):
@@ -149,17 +159,7 @@ Shared logic that more than one handler needs goes below the handlers in `supers
 
 If your state depends on a condition (shooter at speed, intake deployed, target locked), that condition is a readiness flag.
 
-Readiness flags live in one place: the `RobotReadiness` dataclass in `superstructure/robot_state.py`. Please don't scatter them across the codebase.
-
-To add one:
-
-``` python
-@dataclass
-class RobotReadiness:
-    intakeDeployed: bool = False
-```
-
-Then update it in `_update_readiness()` in `superstructure.py`. That method runs before every handler, so handlers always see fresh values. Read it as `self.robot_readiness.intakeDeployed`.
+Readiness flags are attributes on the Superstructure, all set in `_update_readiness()`. Please don't scatter them across the codebase. That method runs before every handler, so handlers always see fresh values. `canFeed` is the example: it's `shooterReady` debounced by 0.1s so one lucky sample can't start a shot.
 
 ------------------------------------------------------------------------
 
@@ -169,17 +169,17 @@ From a button binding in `button_bindings.py`:
 
 ``` python
 self.driverController.button(XboxController.Button.kA).whileTrue(
-    self.superstructure.createStateCommand(RobotState.INTAKING)
+    self.superstructure.createStateCommand(IntakeState.INTAKING)
 )
 ```
 
-`createStateCommand` sets the state when the command starts and drops back to `IDLE` when it ends, as long as nothing else changed the state in between. `PREP_SHOT` moving on to `SHOOTING` by itself doesn't count as a change, so releasing the button still stops the shot. Hold the button, the robot intakes. Let go, she stops.
+`createStateCommand` sets the state when the command starts and drops that enum back to `IDLE` when it ends, as long as nothing else changed it in between. `PREP_SHOT` moving on to `SHOOTING` by itself (see `LINKED_STATES`) doesn't count as a change, so releasing the button still stops the shot. Hold the button, the robot intakes. Let go, she stops.
 
 For autonomous, use `autoCreateStateCommand`. It sets the state and finishes right away so the path keeps moving:
 
 ``` python
 NamedCommands.registerCommand(
-    "Intake", superstructure.autoCreateStateCommand(RobotState.INTAKING)
+    "Intake", superstructure.autoCreateStateCommand(IntakeState.INTAKING)
 )
 ```
 
@@ -227,7 +227,7 @@ Located in `subsystems/drive/autonomous_subsystem.py`
 
 - PathPlanner `AutoBuilder` with a holonomic controller
 - Paths flip automatically on red alliance
-- Named commands and event triggers get registered in `registerNamedCommands()` / `registerEventTriggers()` (both empty for now)
+- Named commands and event triggers get registered in `registerNamedCommands()` / `registerEventTriggers()`, called from `robot_container.py` after the Superstructure exists
 - Assets in `deploy/pathplanner/`
 
 Autos set superstructure states, same as teleop. One brain.
@@ -483,7 +483,7 @@ Hi. If you're reading this, you care enough to build it right. We appreciate you
 - `commands/`: behaviors, grouped by subsystem
 - `superstructure/`: robot intent
     - `superstructure.py`: the state machine, its public API, one handler per state, and shared helpers
-    - `robot_state.py`: `RobotState` and `RobotReadiness`
+    - `robot_state.py`: `MusicState`, `IntakeState`, `ScoringState`
     - `auxiliary_actions.py`: side actions that run outside the state machine (right now: the teleop shift notifier, which rumbles the driver 5 seconds before each shift change)
 - `constants/`: every tunable number
 - `deploy/`: PathPlanner files and songs

@@ -19,3 +19,14 @@ def test_full_match(robot, control):
         control.step_timing(seconds=15.0, autonomous=True, enabled=True)
         control.step_timing(seconds=1.0, autonomous=False, enabled=False)
         control.step_timing(seconds=135.0, autonomous=False, enabled=True)
+
+
+def test_sim_shooters_reach_speed_and_shoot(robot, control):
+    from superstructure import ScoringState
+
+    with control.run_robot():
+        control.step_timing(seconds=0.1, autonomous=False, enabled=True)
+        superstructure = robot.robot_container.superstructure
+        superstructure.setState(ScoringState.PREP_SHOT)
+        control.step_timing(seconds=0.5, autonomous=False, enabled=True)
+        assert superstructure.scoring_state == ScoringState.SHOOTING

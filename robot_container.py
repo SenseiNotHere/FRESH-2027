@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import os
 import typing
 from types import SimpleNamespace
 import wpilib
-from commands2 import InstantCommand, Command
+from commands2 import InstantCommand, Command, cmd
 from commands2.button import CommandGenericHID
 from wpilib import XboxController, SendableChooser, SmartDashboard
 from wpimath.geometry import Rotation2d, Translation3d
 from pathplannerlib.auto import AutoBuilder
 
 from pykit.logger import Logger
+from pykit.networktables.loggeddashboardchooser import LoggedDashboardChooser
 from pykit.inputs.loggablepowerdistribution import LoggedPowerDistribution
 
 from commands import HolonomicDrive
@@ -149,8 +151,14 @@ class RobotContainer:
         )
 
         # Auto and Test Choosers
-        self.auto_chooser = AutoBuilder.buildAutoChooser()
-        SmartDashboard.putData("Auto Chooser", self.auto_chooser)
+        # Logged so replay picks the same auto the robot ran
+        self.auto_chooser: LoggedDashboardChooser[Command] = LoggedDashboardChooser("Auto Chooser")
+        self.auto_chooser.setDefaultOption("None", cmd.none())
+        autos_dir = os.path.join(wpilib.getDeployDirectory(), "pathplanner", "autos")
+        for file in sorted(os.listdir(autos_dir)):
+            if file.endswith(".auto"):
+                name = file.removesuffix(".auto")
+                self.auto_chooser.addOption(name, AutoBuilder.buildAuto(name))
         self._lastPreviewedAuto = None
         self.test_chooser = SendableChooser()
 
@@ -167,17 +175,17 @@ class RobotContainer:
         Logger.recordOutput("Robot/ActiveAuto", str(self._lastPreviewedAuto))
 
     def updateAutoPreview(self):
-        selected = self.auto_chooser.getSelected()
+        selected = self.auto_chooser.selectedValue
 
         if selected != self._lastPreviewedAuto:
-            self.autonomous_subsystem.drawAuto(selected.getName() if selected is not None else "")
+            self.autonomous_subsystem.drawAuto(selected if selected != "None" else "")
             self._lastPreviewedAuto = selected
     
     # Autonomous and Test Command Getters
     def getAutonomousCommand(self) -> typing.Optional[Command]:
         selected_auto = self.auto_chooser.getSelected()
         if selected_auto is not None:
-            log("Robot Container", f"Selected autonomous: {selected_auto.getName()}")
+            log("Robot Container", f"Selected autonomous: {self.auto_chooser.selectedValue}")
             return selected_auto
         else:
             log("Robot Container", "No autonomous selected")

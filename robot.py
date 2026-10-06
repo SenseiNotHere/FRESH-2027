@@ -1,5 +1,6 @@
 import os
 import typing
+import wpilib
 from commands2 import CommandScheduler, Command
 from pykit.loggedrobot import LoggedRobot
 from pykit.logger import Logger
@@ -20,13 +21,16 @@ class FRCRobot(LoggedRobot):
 
         match RobotConstants.kRobotMode:
             case RobotModes.REAL:
+                deploy = wpilib.deployinfo.getDeployData() or {}
+                for key in ("deploy-host", "deploy-user", "deploy-date", "code-path", "git-hash", "git-branch", "git-desc"):
+                    Logger.recordMetadata(key, deploy.get(key, ""))
                 Logger.addDataReciever(WPILOGWriter())
                 Logger.addDataReciever(NT4Publisher(True))
             case RobotModes.SIM:
                 Logger.addDataReciever(NT4Publisher(True))
             case RobotModes.REPLAY:
                 self.useTiming = False
-                log_path = os.environ["LOG_PATH"]
+                log_path = os.path.abspath(os.environ["LOG_PATH"])
                 Logger.setReplaySource(WPILOGReader(log_path))
                 Logger.addDataReciever(WPILOGWriter(log_path.removesuffix(".wpilog") + "_sim.wpilog"))
 
@@ -37,7 +41,6 @@ class FRCRobot(LoggedRobot):
         self.robot_container = RobotContainer()
 
     def robotPeriodic(self):
-        Logger.periodicBeforeUser()
         CommandScheduler.getInstance().run()
         self.robot_container.update()
         self.robot_container.superstructure.update()

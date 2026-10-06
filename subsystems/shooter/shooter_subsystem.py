@@ -1,18 +1,12 @@
 from commands2 import Subsystem
 
-from phoenix6.hardware import TalonFX
-from phoenix6.controls import VelocityVoltage, NeutralOut
-from phoenix6.configs import (
-    TalonFXConfiguration,
-    Slot0Configs,
-    CurrentLimitsConfigs,
-)
-from phoenix6.signals import NeutralModeValue, InvertedValue
-from phoenix6.sim import ChassisReference
+from pykit.logger import Logger
+from pykit.networktables.loggednetworknumber import LoggedNetworkNumber
 
 from wpilib import SmartDashboard, SendableChooser
 
-from constants import ShooterConstants
+from constants import ShooterConstants, RobotConstants, RobotModes
+from .shooter_io import ShooterIO, ShooterIOTalonFX
 
 
 class ShooterSubsystem(Subsystem):
@@ -34,66 +28,29 @@ class ShooterSubsystem(Subsystem):
         """
         super().__init__()
 
-        # Motor setup
-
-        self.motor = TalonFX(motorCANID)
-
-        motorConfig = TalonFXConfiguration()
-        motorConfig.motor_output.neutral_mode = NeutralModeValue.COAST
-        motorConfig.motor_output.inverted = (
-            InvertedValue.COUNTER_CLOCKWISE_POSITIVE
-            if motorInverted
-            else InvertedValue.CLOCKWISE_POSITIVE
-        )
-        self.motor.configurator.apply(motorConfig)
-        # Sim reports velocity in the same direction the real motor is configured for
-        self.motor.sim_state.orientation = (
-            ChassisReference.COUNTER_CLOCKWISE_POSITIVE
-            if motorInverted
-            else ChassisReference.CLOCKWISE_POSITIVE
-        )
-
-        slot0 = Slot0Configs()
-        (
-            slot0
-            .with_k_p(ShooterConstants.kP)
-            .with_k_i(ShooterConstants.kI)
-            .with_k_d(ShooterConstants.kD)
-            .with_k_v(ShooterConstants.kFF)
-        )
-        self.motor.configurator.apply(slot0)
-
-        currentLimits = CurrentLimitsConfigs()
-        (
-            currentLimits
-            .with_supply_current_limit(ShooterConstants.kShooterSupplyLimit)
-            .with_stator_current_limit(ShooterConstants.kShooterStatorLimit)
-            .with_supply_current_limit_enable(True)
-            .with_stator_current_limit_enable(True)
-        )
-        self.motor.configurator.apply(currentLimits)
-
-        self.velocityRequest = VelocityVoltage(0.0).with_slot(0)
-        self.neutralRequest = NeutralOut()
+        # Hardware (replay reads everything back from the log instead)
+        self.io = ShooterIO() if RobotConstants.kRobotMode == RobotModes.REPLAY else ShooterIOTalonFX(motorCANID, motorInverted)
+        self.inputs = ShooterIO.ShooterIOInputs()
+        self._logKey = f"Shooter/{motorCANID}"
 
         # State
 
         self._targetRPS: float | None = None
 
         # Dashboard (Manual Testing Only)
-        SmartDashboard.putNumber("Shooter/Shooter Percent Input", 25)
+        self.percentInput = LoggedNetworkNumber("/SmartDashboard/Shooter/Shooter Percent Input", 25)
         self.kMaxRPM = ShooterConstants.kMaxRPM
 
     # Periodic
 
     def periodic(self):
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs(self._logKey, self.inputs)
 
         if self._targetRPS is None:
-            self.motor.set_control(self.neutralRequest)
+            self.io.stop()
         else:
-            self.motor.set_control(
-                self.velocityRequest.with_velocity(self._targetRPS)
-            )
+            self.io.setVelocity(self._targetRPS)
 
         # Telemetry
         SmartDashboard.putNumber(
@@ -102,7 +59,7 @@ class ShooterSubsystem(Subsystem):
         )
         SmartDashboard.putNumber(
             "Shooter/Current RPM",
-            self.motor.get_velocity().value * 60.0
+            self.inputs.velocityRPS * 60.0
         )
 
     # High-Level API
@@ -116,7 +73,7 @@ class ShooterSubsystem(Subsystem):
         self._targetRPS = target_rpm / 60.0
 
     def useDashboardPercent(self):
-        percentInput = SmartDashboard.getNumber("Shooter/Shooter Percent Input", 75)
+        percentInput = self.percentInput.value
         percent = percentInput / 100
         self.setPercent(percent)
 
@@ -128,7 +85,7 @@ class ShooterSubsystem(Subsystem):
             return False
 
         target_rpm = self._targetRPS * 60.0
-        current_rpm = self.motor.get_velocity().value * 60.0
+        current_rpm = self.inputs.velocityRPS * 60.0
 
         return abs(current_rpm - target_rpm) <= tolerance_rpm
 
@@ -136,11 +93,11 @@ class ShooterSubsystem(Subsystem):
         return self._targetRPS or 0.0
 
     def getCurrentRPS(self) -> float:
-        return self.motor.get_velocity().value
+        return self.inputs.velocityRPS
 
     def isSpinning(self) -> bool:
         return self._targetRPS is not None
 
     # Motors
     def getMotors(self):
-        yield self.motor
+        yield from self.io.getMotors()

@@ -41,9 +41,9 @@ class ShiftNotifier:
             return
 
         if self.matchStartTime is None:
-            self.matchStartTime = Timer.getFPGATimestamp()
+            self.matchStartTime = Timer.getTimestamp()
 
-        elapsed = Timer.getFPGATimestamp() - self.matchStartTime
+        elapsed = Timer.getTimestamp() - self.matchStartTime
 
         currentShift = SHIFT_STARTS[0][1]
         for start, name in SHIFT_STARTS[1:]:
@@ -63,10 +63,10 @@ class ShiftNotifier:
         log("Aux", text)
         Logger.recordOutput("Match/ShiftAlert", text)
         self._set_rumble(0.6)
-        self._rumble_end_time = Timer.getFPGATimestamp() + 0.3
+        self._rumble_end_time = Timer.getTimestamp() + 0.3
 
     def _handle_rumble_timeout(self):
-        if self._rumble_end_time is not None and Timer.getFPGATimestamp() >= self._rumble_end_time:
+        if self._rumble_end_time is not None and Timer.getTimestamp() >= self._rumble_end_time:
             self._set_rumble(0)
             self._rumble_end_time = None
 

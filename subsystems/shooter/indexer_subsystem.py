@@ -1,15 +1,9 @@
 from commands2 import Subsystem
-from rev import (
-    SparkMax,
-    SparkMaxConfig,
-    SparkLowLevel,
-    SparkBase,
-    ResetMode,
-    PersistMode
-)
+from pykit.logger import Logger
 from wpilib import SmartDashboard, SendableChooser
 
-from constants import IndexerConstants
+from constants import IndexerConstants, RobotConstants, RobotModes
+from .shooter_io import IndexerIO, IndexerIOSparkMax
 
 
 class IndexerSubsystem(Subsystem):
@@ -28,29 +22,9 @@ class IndexerSubsystem(Subsystem):
         """
         super().__init__()
 
-        # Motor Setup
-        self.motor = SparkMax(
-            motorCANID,
-            SparkLowLevel.MotorType.kBrushless
-        )
-
-        config = SparkMaxConfig()
-        config.setIdleMode(SparkMaxConfig.IdleMode.kCoast)
-        config.inverted(motorInverted)
-
-        config.closedLoop.P(IndexerConstants.kP)
-        config.closedLoop.I(IndexerConstants.kI)
-        config.closedLoop.D(IndexerConstants.kD)
-        config.closedLoop.velocityFF(IndexerConstants.kFF)
-        config.closedLoop.outputRange(-1.0, 1.0)
-
-        self.motor.configure(
-            config,
-            ResetMode.kResetSafeParameters,
-            PersistMode.kPersistParameters
-        )
-
-        self.pid = self.motor.getClosedLoopController()
+        # Hardware (replay reads everything back from the log instead)
+        self.io = IndexerIO() if RobotConstants.kRobotMode == RobotModes.REPLAY else IndexerIOSparkMax(motorCANID, motorInverted)
+        self.inputs = IndexerIO.IndexerIOInputs()
 
         # Internal state
         self._targetRPM: float | None = None
@@ -72,13 +46,13 @@ class IndexerSubsystem(Subsystem):
     # Periodic
 
     def periodic(self):
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs("Indexer", self.inputs)
+
         if self._targetRPM is None:
-            self.motor.set(0.0)
+            self.io.stop()
         else:
-            self.pid.setReference(
-                self._targetRPM,
-                SparkBase.ControlType.kVelocity
-            )
+            self.io.setVelocity(self._targetRPM)
         self._lastCommandedRPM = self._targetRPM
 
         SmartDashboard.putNumber(

@@ -55,7 +55,7 @@ class FakeClock:
     now = 0.0
 
     @classmethod
-    def getFPGATimestamp(cls):
+    def getTimestamp(cls):
         return cls.now
 
 
@@ -68,28 +68,28 @@ def agitator(can_id, monkeypatch):
 
 def test_agitator_feed_reverse_stop(agitator):
     agitator.feed()
-    assert agitator.motor.get() == pytest.approx(0.25)
+    assert agitator.io.motor.get() == pytest.approx(0.25)
     agitator.reverse()
-    assert agitator.motor.get() == pytest.approx(-0.25)
+    assert agitator.io.motor.get() == pytest.approx(-0.25)
     agitator.stop()
-    assert agitator.motor.get() == 0.0
+    assert agitator.io.motor.get() == 0.0
 
 
 def test_agitator_oscillates(agitator):
     agitator.startOscillate(forwardSeconds=2.0, backwardSeconds=0.5)
-    assert agitator.motor.get() > 0
+    assert agitator.io.motor.get() > 0
 
     FakeClock.now = 1.9
     agitator.periodic()
-    assert agitator.motor.get() > 0
+    assert agitator.io.motor.get() > 0
 
     FakeClock.now = 2.1
     agitator.periodic()
-    assert agitator.motor.get() < 0
+    assert agitator.io.motor.get() < 0
 
     FakeClock.now = 2.7
     agitator.periodic()
-    assert agitator.motor.get() > 0
+    assert agitator.io.motor.get() > 0
 
 
 def test_feed_cancels_oscillation(agitator):
@@ -97,7 +97,7 @@ def test_feed_cancels_oscillation(agitator):
     agitator.feed()
     FakeClock.now = 10.0
     agitator.periodic()
-    assert agitator.motor.get() > 0
+    assert agitator.io.motor.get() > 0
 
 
 def shot_from(pose: Pose2d) -> ShotCalculator:

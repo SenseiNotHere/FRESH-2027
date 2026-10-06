@@ -3,13 +3,12 @@ from dataclasses import dataclass
 from typing import Dict, TYPE_CHECKING
 
 from commands2 import Subsystem
-from wpilib import SmartDashboard, SendableChooser, DriverStation
+from wpilib import SmartDashboard, SendableChooser, DriverStation, Timer
 from wpimath.geometry import Rotation2d, Translation3d, Pose2d
-from phoenix6 import utils
 from pykit.logger import Logger
 
 from .limelight_camera import LimelightCamera
-from utils import log
+from utils import log, LoggedChooser
 
 if TYPE_CHECKING:
     from subsystems.drive.drive_subsystem import DriveSubsystem
@@ -49,13 +48,12 @@ class LimelightLocalizer(Subsystem):
         self.flipIfRed = flipIfRed
 
         # Higher trust shrinks the std devs, so vision pulls the pose harder
-        self.trustMult = SendableChooser()
+        self.trustMult = LoggedChooser("Localizer Trust")
         self.trustMult.addOption("300%", 3.0)
         self.trustMult.setDefaultOption("100%", 1.0)
         self.trustMult.addOption("50%", 0.5)
         self.trustMult.addOption("30%", 0.3)
         self.trustMult.addOption("10%", 0.1)
-        SmartDashboard.putData("Localizer Trust", self.trustMult)
 
         self.enabled = None
         self.allowed = True
@@ -142,11 +140,11 @@ class LimelightLocalizer(Subsystem):
             if flipped:
                 yaw = (heading + U_TURN).degrees()
                 camera.robotOrientationSetRequest.set([yaw, 0.0, 0.0, 0.0, 0.0, 0.0])
-                botpose = camera.botPoseFlipped.get()
+                botpose = camera.inputs.botPoseFlipped
             else:
                 yaw = heading.degrees()
                 camera.robotOrientationSetRequest.set([yaw, 0.0, 0.0, 0.0, 0.0, 0.0])
-                botpose = camera.botPose.get()
+                botpose = camera.inputs.botPose
 
             if len(botpose) >= 11:
                 # Translation (X,Y,Z), Rotation(Roll,Pitch,Yaw) in degrees,
@@ -167,7 +165,7 @@ class LimelightLocalizer(Subsystem):
                     xyStdDev = XY_STD_DEV / (trust * gain)
                     self.drivetrain.add_vision_measurement(
                         Pose2d(x, y, heading),
-                        utils.get_current_time_seconds() - latencyMillisec / 1000.0,
+                        Timer.getTimestamp() - latencyMillisec / 1000.0,
                         (xyStdDev, xyStdDev, HEADING_STD_DEV),
                     )
 
@@ -189,10 +187,9 @@ class LimelightLocalizer(Subsystem):
             flipped, self.username, self.flipIfRed))
 
         # Enabled chooser
-        self.enabled = SendableChooser()
+        self.enabled = LoggedChooser("Localizer")
         self.enabled.addOption("off", (None, False))
         if flipped in (None, False):
             self.enabled.setDefaultOption("on", (True, False))
         if flipped in (None, True):
             self.enabled.setDefaultOption("on-flipped", (True, True))
-        SmartDashboard.putData("Localizer", self.enabled)

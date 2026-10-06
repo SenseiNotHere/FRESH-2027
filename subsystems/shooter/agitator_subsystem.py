@@ -1,13 +1,11 @@
 from commands2 import Subsystem
 from wpilib import SmartDashboard, SendableChooser, Timer
 
-from rev import (
-    SparkMax,
-    SparkMaxConfig,
-    SparkLowLevel,
-    ResetMode,
-    PersistMode
-)
+from pykit.logger import Logger
+
+from utils import LoggedChooser
+from constants import RobotConstants, RobotModes
+from .shooter_io import AgitatorIO, AgitatorIOSparkMax
 
 class AgitatorSubsystem(Subsystem):
     def __init__(
@@ -29,26 +27,16 @@ class AgitatorSubsystem(Subsystem):
         """
         super().__init__()
 
-        # Motor Setup
-        self.motor = SparkMax(motorCANID, SparkLowLevel.MotorType.kBrushless)
+        # Hardware (replay reads everything back from the log instead)
+        self.io = AgitatorIO() if RobotConstants.kRobotMode == RobotModes.REPLAY else AgitatorIOSparkMax(motorCANID, motorInverted)
+        self.inputs = AgitatorIO.AgitatorIOInputs()
 
-        motorConfig = SparkMaxConfig()
-        motorConfig.setIdleMode(SparkMaxConfig.IdleMode.kCoast)
-        motorConfig.inverted(motorInverted)
-
-        self.motor.configure(
-            motorConfig,
-            ResetMode.kResetSafeParameters,
-            PersistMode.kPersistParameters
-        )
-
-        self.speedChooser = SendableChooser()
+        self.speedChooser = LoggedChooser("Agitator/Motor 1 Speed Chooser")
         self.speedChooser.setDefaultOption("25%", 0.25)
         self.speedChooser.addOption("5%", 0.05)
         self.speedChooser.addOption("50%", 0.5)
         self.speedChooser.addOption("75%", 0.75)
         self.speedChooser.addOption("100%", 1.0)
-        SmartDashboard.putData("Agitator/Motor 1 Speed Chooser", self.speedChooser)
 
         # Oscillation logic
         self._oscillateEnabled = False
@@ -61,8 +49,11 @@ class AgitatorSubsystem(Subsystem):
         self._lastCommandedSpeed: float | None = None
 
     def periodic(self):
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs("Agitator", self.inputs)
+
         if self._oscillateEnabled:
-            now = Timer.getFPGATimestamp()
+            now = Timer.getTimestamp()
             elapsed = now - self._lastToggleTime
             period = self._forwardPeriod if self._forward else self._backwardPeriod
 
@@ -71,7 +62,7 @@ class AgitatorSubsystem(Subsystem):
                 self._forward = not self._forward
                 self._applyOscillateOutput()  # only command on direction flip
 
-        SmartDashboard.putNumber("Agitator/Motor Speed", self.motor.get())
+        SmartDashboard.putNumber("Agitator/Motor Speed", self._lastCommandedSpeed or 0.0)
         SmartDashboard.putBoolean("Agitator/Agitator Running", self.isRunning())
         SmartDashboard.putBoolean("Agitator/Agitator Oscillating", self._oscillateEnabled)
         SmartDashboard.putBoolean("Agitator/Agitator Forward", self._forward)
@@ -79,7 +70,7 @@ class AgitatorSubsystem(Subsystem):
     def _setSpeed(self, speed: float) -> None:
         """Only sends command to motor if speed has changed."""
         if speed != self._lastCommandedSpeed:
-            self.motor.set(speed)
+            self.io.setSpeed(speed)
             self._lastCommandedSpeed = speed
 
     def feed(self) -> None:
@@ -97,13 +88,13 @@ class AgitatorSubsystem(Subsystem):
         self._setSpeed(0.0)
 
     def isRunning(self) -> bool:
-        return abs(self.motor.get()) > 0.01
+        return abs(self._lastCommandedSpeed or 0.0) > 0.01
 
     def startOscillate(self, forwardSeconds: float = 2.0, backwardSeconds: float = 0.5) -> None:
         self._forwardPeriod = max(0.05, float(forwardSeconds))
         self._backwardPeriod = max(0.05, float(backwardSeconds))
         if not self._oscillateEnabled:
-            self._lastToggleTime = Timer.getFPGATimestamp()
+            self._lastToggleTime = Timer.getTimestamp()
             self._forward = True
         self._oscillateEnabled = True
         self._applyOscillateOutput()  # command immediately on start

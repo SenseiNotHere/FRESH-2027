@@ -19,7 +19,7 @@ def teleop_only(func):
         if not DriverStation.isTeleopEnabled():
             blocked_count += 1
             Logger.recordOutput(f"{key}/BlockedCount", blocked_count)
-            now = Timer.getFPGATimestamp()
+            now = Timer.getTimestamp()
             if now - last_warn_time >= 1.0:
                 last_warn_time = now
                 reportWarning(
@@ -39,7 +39,7 @@ def throttle(cooldown_seconds):
         @wraps(func)
         def wrapper(*args, **kwargs):
             nonlocal last_called, throttled_count
-            current_time = Timer.getFPGATimestamp()
+            current_time = Timer.getTimestamp()
             if current_time - last_called < cooldown_seconds:
                 throttled_count += 1
                 Logger.recordOutput(f"{key}/ThrottledCount", throttled_count)
@@ -74,7 +74,7 @@ def fail_safe(fallback_value=None, warn_interval_seconds=1.0):
                 Logger.recordOutput(f"{key}/ErrorCount", error_count)
                 Logger.recordOutput(f"{key}/LastError", str(e))
 
-                now = Timer.getFPGATimestamp()
+                now = Timer.getTimestamp()
                 if now - last_warn_time >= warn_interval_seconds:
                     last_warn_time = now
                     reportWarning(

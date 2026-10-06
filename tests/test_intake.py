@@ -19,13 +19,13 @@ def test_homes_by_driving_down(intake, monkeypatch):
     monkeypatch.setattr(intake, "reverse_limit_pressed", lambda: False)
     intake.periodic()
     assert not intake.is_homed()
-    assert intake.deployMotor.get() == pytest.approx(-IntakeConstants.kHomeSpeed)
+    assert intake.io.deployMotor.get() == pytest.approx(-IntakeConstants.kHomeSpeed)
 
 
 def test_reverse_limit_homes_at_stow(intake, monkeypatch):
     home(intake, monkeypatch)
     assert intake.is_homed()
-    assert intake.deployEncoder.getPosition() == pytest.approx(IntakeConstants.kStowPosition)
+    assert intake.io.deployEncoder.getPosition() == pytest.approx(IntakeConstants.kStowPosition)
 
 
 def test_wont_deploy_before_homing(intake):
@@ -48,6 +48,6 @@ def test_intake_speed_is_percent_of_max(intake):
 
 def test_reverse_and_stop(intake):
     intake.intake_reverse()
-    assert intake.intakeRequest.velocity == pytest.approx(-IntakeConstants.kIntakeSpeed)
+    assert intake.io.intakeRequest.velocity == pytest.approx(-IntakeConstants.kIntakeSpeed)
     intake.stop_intake()
-    assert intake.intakeRequest.velocity == 0
+    assert intake.io.intakeRequest.velocity == 0

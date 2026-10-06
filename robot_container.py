@@ -11,7 +11,6 @@ from wpimath.geometry import Rotation2d, Translation3d
 from pathplannerlib.auto import AutoBuilder
 
 from pykit.logger import Logger
-from pykit.networktables.loggeddashboardchooser import LoggedDashboardChooser
 from pykit.inputs.loggablepowerdistribution import LoggedPowerDistribution
 
 from commands import HolonomicDrive
@@ -34,7 +33,7 @@ from subsystems import (
 
 from button_bindings import ButtonBindings
 
-from utils import log, print_banner
+from utils import log, print_banner, LoggedChooser
 
 
 class RobotContainer:
@@ -152,7 +151,7 @@ class RobotContainer:
 
         # Auto and Test Choosers
         # Logged so replay picks the same auto the robot ran
-        self.auto_chooser: LoggedDashboardChooser[Command] = LoggedDashboardChooser("Auto Chooser")
+        self.auto_chooser = LoggedChooser("Auto Chooser")
         self.auto_chooser.setDefaultOption("None", cmd.none())
         autos_dir = os.path.join(wpilib.getDeployDirectory(), "pathplanner", "autos")
         for file in sorted(os.listdir(autos_dir)):

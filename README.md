@@ -287,7 +287,37 @@ Logging runs through pykit.
 
 - Real robot: writes a `.wpilog` and publishes to NetworkTables
 - Simulation: publishes to NetworkTables only
-- Replay: set up, not implemented yet
+- Replay: reruns the code against a `.wpilog`, writes `<log>_sim.wpilog` next to it
+
+To replay a match log (see `replay_mode.txt`):
+
+    $env:LOG_PATH='C:\path\to\log.wpilog'
+    robotpy sim --nogui
+    Remove-Item Env:LOG_PATH
+
+Open the original and the `_sim` log in AdvantageScope. `RealOutputs/` is what the robot did, `ReplayOutputs/` is what the current code does with the same inputs.
+
+## 🔌 IO Layers (How Replay Works)
+
+Subsystems never touch hardware directly. Every sensor read goes through an IO class:
+
+| Subsystem | IO file |
+|---|---|
+| Drive | `subsystems/drive/drive_io.py` |
+| Intake | `subsystems/intake/intake_io.py` |
+| Shooter, Indexer, Agitator | `subsystems/shooter/shooter_io.py` |
+| Limelight | `LimelightIO` in `subsystems/vision/limelight_camera.py` |
+
+Each IO has two classes. The base class (`ShooterIO`) does nothing and is what replay uses. The real one (`ShooterIOTalonFX`) talks to the motors, on the robot and in sim. Every loop the subsystem calls `io.updateInputs(self.inputs)` then `Logger.processInputs(...)`: on the robot that logs the readings, in replay it fills them from the log instead.
+
+Rules that keep replay honest:
+
+- **Read sensors only through `self.inputs`.** A direct `motor.get_velocity()` in a subsystem won't be in the log, so replay can't reproduce it.
+- **Use `Timer.getTimestamp()`, not `Timer.getFPGATimestamp()`.** Only the first one follows the log's clock in replay.
+- **Dashboard choosers: use `utils.LoggedChooser`, not `SendableChooser`.** Otherwise replay doesn't know what was selected.
+- New subsystem? Copy `shooter_io.py`'s shape: an `@autolog @dataclass` inputs class, a do-nothing base IO, a real IO.
+
+Known limit: the drive pose comes from CTRE's own estimator, so replay plays the logged pose back instead of recomputing it. Changes to vision code won't move the pose in replay (see the `ponytail:` note in `drive_io.py`).
 
 The PDH gets logged too. To turn PDH logging off (e.g. if the console fills up with `CAN: Message not Found`), set `RobotConstants.kLogPDH = False`.
 

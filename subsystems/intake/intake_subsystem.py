@@ -1,24 +1,11 @@
 from commands2 import Subsystem
 from wpilib import SmartDashboard, DriverStation, Timer, SendableChooser
 
-from phoenix6.hardware import TalonFX
-from phoenix6.controls import VelocityTorqueCurrentFOC
-from phoenix6.configs import TalonFXConfiguration, Slot0Configs, CurrentLimitsConfigs
-from phoenix6.signals import NeutralModeValue, InvertedValue
+from pykit.logger import Logger
 
-from rev import (
-    SparkMax,
-    SparkMaxConfig,
-    SparkBaseConfig,
-    SparkBase,
-    LimitSwitchConfig,
-    ClosedLoopSlot,
-    PersistMode,
-    ResetMode,
-    FeedbackSensor
-)
-
-from constants import IntakeConstants
+from utils import LoggedChooser
+from constants import IntakeConstants, RobotConstants, RobotModes
+from .intake_io import IntakeIO, IntakeIOReal
 
 
 class IntakeSubsystem(Subsystem):
@@ -47,84 +34,19 @@ class IntakeSubsystem(Subsystem):
         """
         super().__init__()
 
-        # Deploy motor
-        self.deployMotor = SparkMax(deployMotorCANID, SparkMax.MotorType.kBrushless)
-
-        deployConfig = SparkMaxConfig()
-        deployConfig.setIdleMode(SparkBaseConfig.IdleMode.kBrake)
-        deployConfig.inverted(deployMotorInverted)
-
-        deployConfig.limitSwitch.forwardLimitSwitchEnabled(True)
-        deployConfig.limitSwitch.reverseLimitSwitchEnabled(True)
-        deployConfig.limitSwitch.forwardLimitSwitchType(LimitSwitchConfig.Type.kNormallyOpen)
-        deployConfig.limitSwitch.reverseLimitSwitchType(LimitSwitchConfig.Type.kNormallyOpen)
-
-        deployConfig.closedLoop.pid(
-            IntakeConstants.kDeployP,
-            IntakeConstants.kDeployI,
-            IntakeConstants.kDeployD,
+        # Hardware (replay reads everything back from the log instead)
+        self.io = (
+            IntakeIO() if RobotConstants.kRobotMode == RobotModes.REPLAY
+            else IntakeIOReal(deployMotorCANID, deployMotorInverted, intakeMotorCANID, intakeMotorInverted)
         )
-        deployConfig.closedLoop.outputRange(
-            IntakeConstants.kDeployMinOutput,
-            IntakeConstants.kDeployMaxOutput,
-            ClosedLoopSlot.kSlot0
-        )
-        deployConfig.closedLoop.setFeedbackSensor(FeedbackSensor.kPrimaryEncoder)
-
-        self.deployMotor.configure(
-            deployConfig,
-            ResetMode.kResetSafeParameters,
-            PersistMode.kPersistParameters
-        )
-        self.deployMotor.clearFaults()
-
-        self.deployEncoder = self.deployMotor.getEncoder()
-        self.deployController = self.deployMotor.getClosedLoopController()
-
-        self.forwardLimit = self.deployMotor.getForwardLimitSwitch()
-        self.reverseLimit = self.deployMotor.getReverseLimitSwitch()
-
-        # Intake Motor (Talon FX)
-        self.intakeMotor = TalonFX(intakeMotorCANID)
-
-        intakeConfig = TalonFXConfiguration()
-        intakeConfig.motor_output.neutral_mode = NeutralModeValue.COAST
-        intakeConfig.motor_output.inverted = (
-            InvertedValue.CLOCKWISE_POSITIVE
-            if intakeMotorInverted
-            else InvertedValue.COUNTER_CLOCKWISE_POSITIVE
-        )
-        self.intakeMotor.configurator.apply(intakeConfig)
-
-        slot0Intake = Slot0Configs()
-        (
-            slot0Intake
-            .with_k_p(IntakeConstants.kIntakeP)
-            .with_k_i(IntakeConstants.kIntakeI)
-            .with_k_d(IntakeConstants.kIntakeD)
-            .with_k_v(IntakeConstants.kIntakeFF
-                      )
-        )
-        self.intakeMotor.configurator.apply(slot0Intake)
-
-        currentConfig = CurrentLimitsConfigs()
-        (
-            currentConfig
-            .with_supply_current_limit(20)
-            .with_stator_current_limit(20)
-            .with_supply_current_limit_enable(True)
-            .with_stator_current_limit_enable(True)
-        )
-        self.intakeMotor.configurator.apply(currentConfig)
-
-        self.intakeRequest = VelocityTorqueCurrentFOC(0)
+        self.inputs = IntakeIO.IntakeIOInputs()
 
         # State
         self._homed = False
         self._isDeployed = False
 
         # Speed Chooser (percent of kIntakeSpeed)
-        self.speedChooser = SendableChooser()
+        self.speedChooser = LoggedChooser("Intake Speed")
         self.speedChooser.addOption("5%", 5)
         self.speedChooser.addOption("1%", 1)
         self.speedChooser.addOption("10%", 10)
@@ -146,21 +68,20 @@ class IntakeSubsystem(Subsystem):
         self.speedChooser.addOption("90%", 90)
         self.speedChooser.addOption("95%", 95)
         self.speedChooser.addOption("100%", 100)
-        SmartDashboard.putData("Intake Speed", self.speedChooser)
         self.velocity = 0
 
         # Limit Helpers
 
     def forward_limit_pressed(self):
-        return self.forwardLimit.get()
+        return self.inputs.forwardLimit
 
     def reverse_limit_pressed(self):
-        return self.reverseLimit.get()
+        return self.inputs.reverseLimit
 
     # Limit Switch Sync
 
     def _sync_encoders(self, target_position: float):
-        self.deployEncoder.setPosition(target_position)
+        self.io.resetDeployPosition(target_position)
 
     def _sync_to_stow(self):
         if not self._homed:
@@ -171,14 +92,17 @@ class IntakeSubsystem(Subsystem):
         # Periodic
 
     def periodic(self):
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs("Intake", self.inputs)
+
         SmartDashboard.putBoolean("Intake/Intake Homed", self._homed)
         SmartDashboard.putBoolean("Intake/Intake Deployed", self._isDeployed)
         SmartDashboard.putBoolean("Intake/Forward Limit", self.forward_limit_pressed())
         SmartDashboard.putBoolean("Intake/Reverse Limit", self.reverse_limit_pressed())
-        SmartDashboard.putNumber("Intake/Intake Actual Speed", self.intakeMotor.get_velocity().value)
-        SmartDashboard.putNumber("Intake/Intake Motor Supply Current", self.intakeMotor.get_supply_current().value)
-        SmartDashboard.putNumber("Pivot Motor/Pivot Motor Positon", self.deployMotor.getEncoder().getPosition())
-        SmartDashboard.putNumber("Pivot Motor/Current", self.deployMotor.getOutputCurrent())
+        SmartDashboard.putNumber("Intake/Intake Actual Speed", self.inputs.rollerVelocity)
+        SmartDashboard.putNumber("Intake/Intake Motor Supply Current", self.inputs.rollerSupplyCurrentAmps)
+        SmartDashboard.putNumber("Pivot Motor/Pivot Motor Positon", self.inputs.deployPosition)
+        SmartDashboard.putNumber("Pivot Motor/Current", self.inputs.deployCurrentAmps)
 
         # # Always sync position if a limit switch is hit (homed or not)
         # if self.forward_limit_pressed():
@@ -198,44 +122,32 @@ class IntakeSubsystem(Subsystem):
         speed = IntakeConstants.kHomeSpeed
         # if DriverStation.isAutonomous():
         #    speed = -speed
-        self.deployMotor.set(-speed)
+        self.io.setDeploySpeed(-speed)
 
         # Deploy Control
 
     def driveDeployMotor(self, speed: float):
-        self.deployMotor.set(speed)
+        self.io.setDeploySpeed(speed)
 
     def stopDeployMotor(self):
-        self.deployMotor.stopMotor()
+        self.io.stopDeploy()
 
     def deploy(self):
         if not self._homed:
             return
-        self.deployController.setReference(
-            IntakeConstants.kDeployPosition,
-            SparkBase.ControlType.kPosition,
-            ClosedLoopSlot.kSlot0
-        )
+        self.io.setDeployPosition(IntakeConstants.kDeployPosition)
         self._isDeployed = True
 
     def stow(self):
         if not self._homed:
             return
-        self.deployController.setReference(
-            IntakeConstants.kStowPosition,
-            SparkBase.ControlType.kPosition,
-            ClosedLoopSlot.kSlot0
-        )
+        self.io.setDeployPosition(IntakeConstants.kStowPosition)
         self._isDeployed = False
 
     def go_to_pulse_position(self):
         if not self._homed:
             return
-        self.deployController.setReference(
-            IntakeConstants.kPulsePosition,
-            SparkBase.ControlType.kPosition,
-            ClosedLoopSlot.kSlot0
-        )
+        self.io.setDeployPosition(IntakeConstants.kPulsePosition)
         self._isDeployed = False
 
     def toggle_position(self):
@@ -245,22 +157,20 @@ class IntakeSubsystem(Subsystem):
             self.deploy()
 
     def stop_deploy(self):
-        self.deployMotor.set(0)
+        self.io.setDeploySpeed(0)
 
         # Intake Rollers
 
     def intake(self):
         self.velocity = self.speedChooser.getSelected() / 100 * IntakeConstants.kIntakeSpeed
-        self.intakeMotor.set_control(self.intakeRequest.with_velocity(self.velocity))
+        self.io.setRollerVelocity(self.velocity)
         SmartDashboard.putNumber("Intake/Intake Velocity", self.velocity)
 
     def intake_reverse(self):
-        self.intakeMotor.set_control(
-            self.intakeRequest.with_velocity(-IntakeConstants.kIntakeSpeed)
-        )
+        self.io.setRollerVelocity(-IntakeConstants.kIntakeSpeed)
 
     def stop_intake(self):
-        self.intakeMotor.set_control(self.intakeRequest.with_velocity(0))
+        self.io.setRollerVelocity(0)
         SmartDashboard.putNumber("Intake/Intake Velocity", 0)
 
     def stop(self):
@@ -277,4 +187,4 @@ class IntakeSubsystem(Subsystem):
         return self._isDeployed
 
     def getMotors(self):
-        yield self.intakeMotor
+        yield from self.io.getMotors()

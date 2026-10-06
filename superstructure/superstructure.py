@@ -20,7 +20,7 @@ from subsystems import (
 from .robot_state import MusicState, IntakeState, ScoringState
 from .auxiliary_actions import AuxiliaryActions
 
-from utils import log
+from utils import log, LoggedChooser
 
 # Releasing a command that set PREP_SHOT also stops SHOOTING, since PREP_SHOT advances there on its own
 LINKED_STATES = {ScoringState.PREP_SHOT: ScoringState.SHOOTING}
@@ -74,7 +74,7 @@ class Superstructure:
             IntakeState: IntakeState.IDLE,
             ScoringState: ScoringState.IDLE,
         }
-        now = Timer.getFPGATimestamp()
+        now = Timer.getTimestamp()
         self._entered_at = {enum: now for enum in self.states}
 
         self._handlers = {
@@ -103,10 +103,9 @@ class Superstructure:
 
         self.auxiliary_actions = AuxiliaryActions(self.driverController)
 
-        self.shotCalcChooser = SendableChooser()
+        self.shotCalcChooser = LoggedChooser("Shot Calculator")
         self.shotCalcChooser.setDefaultOption("on", True)
         self.shotCalcChooser.addOption("off", False)
-        SmartDashboard.putData("Shot Calculator", self.shotCalcChooser)
 
         Superstructure._instance = self
 
@@ -161,13 +160,13 @@ class Superstructure:
             return
 
         self.states[enum] = newState
-        self._entered_at[enum] = Timer.getFPGATimestamp()
+        self._entered_at[enum] = Timer.getTimestamp()
 
         log("Superstructure", f"{enum.__name__}: {oldState.name} -> {newState.name}")
         Logger.recordOutput(f"Superstructure/{enum.__name__}/LastTransition", f"{oldState.name} -> {newState.name}")
 
     def _time_in_state(self, enum: type[Enum]) -> float:
-        return Timer.getFPGATimestamp() - self._entered_at[enum]
+        return Timer.getTimestamp() - self._entered_at[enum]
 
     def _update_readiness(self):
         self.shooterReady = len(self.shooters) > 0 and all(s.atSpeed(tolerance_rpm=50) for s in self.shooters)

@@ -10,23 +10,14 @@ from wpimath.filter import SlewRateLimiter
 
 from pykit.logger import Logger
 
-from phoenix6.hardware import TalonFX, CANcoder
-from phoenix6.configs import TalonFXConfiguration
-
-from phoenix6.swerve import (
-    SwerveDrivetrain,
-    SwerveDrivetrainConstants,
-    SwerveModuleConstantsFactory,
-    ClosedLoopOutputType
-)
-
 from phoenix6.swerve.requests import ApplyFieldSpeeds, ApplyRobotSpeeds, SwerveDriveBrake
 
-from constants import SwerveConstants, ModuleConstants
+from constants import SwerveConstants, RobotConstants, RobotModes
+from .drive_io import DriveIO, DriveIOCTRE
 
 
 CALIBRATING_DRIVETRAIN = False
-class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
+class DriveSubsystem(Subsystem):
     def __init__(self, maxSpeedScaleFactor):
         Subsystem.__init__(self)
 
@@ -35,103 +26,9 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         if self.maxSpeedScaleFactor is not None:
             assert callable(self.maxSpeedScaleFactor)
 
-        # Module factory
-        module_factory = (
-            SwerveModuleConstantsFactory()
-            .with_drive_motor_gear_ratio(ModuleConstants.kDriveGearRatio)
-            .with_steer_motor_gear_ratio(ModuleConstants.kTurningGearRatio)
-            .with_wheel_radius(ModuleConstants.kWheelRadius)
-            .with_slip_current(ModuleConstants.kSlipCurrent)
-            .with_drive_motor_gains(ModuleConstants.kDriveGains)
-            .with_steer_motor_gains(ModuleConstants.kTurningGains)
-            .with_drive_motor_closed_loop_output(ClosedLoopOutputType.TORQUE_CURRENT_FOC)
-            .with_speed_at12_volts(ModuleConstants.kSpeedAt12Volts)
-            .with_coupling_gear_ratio(ModuleConstants.kSteerDriveCouplingRatio)
-        )
-
-        front_left = module_factory.create_module_constants(
-            steer_motor_id=SwerveConstants.kFrontLeftTurning,
-            drive_motor_id=SwerveConstants.kFrontLeftDriving,
-            encoder_id=SwerveConstants.kFrontLeftTurningEncoder,
-            encoder_offset=ModuleConstants.kFrontLeftTurningEncoderOffset,
-            location_x=SwerveConstants.kFrontLeftX,
-            location_y=SwerveConstants.kFrontLeftY,
-            drive_motor_inverted=ModuleConstants.kFrontLeftDriveMotorInverted,
-            steer_motor_inverted=ModuleConstants.kTurningMotorInverted,
-            encoder_inverted=ModuleConstants.kTurningEncoderInverted
-        )
-
-        front_right = module_factory.create_module_constants(
-            steer_motor_id=SwerveConstants.kFrontRightTurning,
-            drive_motor_id=SwerveConstants.kFrontRightDriving,
-            encoder_id=SwerveConstants.kFrontRightTurningEncoder,
-            encoder_offset=ModuleConstants.kFrontRightTurningEncoderOffset,
-            location_x=SwerveConstants.kFrontRightX,
-            location_y=SwerveConstants.kFrontRightY,
-            drive_motor_inverted=ModuleConstants.kFrontRightDriveMotorInverted,
-            steer_motor_inverted=ModuleConstants.kTurningMotorInverted,
-            encoder_inverted=ModuleConstants.kTurningEncoderInverted
-        )
-
-        back_left = module_factory.create_module_constants(
-            steer_motor_id=SwerveConstants.kBackLeftTurning,
-            drive_motor_id=SwerveConstants.kBackLeftDriving,
-            encoder_id=SwerveConstants.kBackLeftTurningEncoder,
-            encoder_offset=ModuleConstants.kBackLeftTurningEncoderOffset,
-            location_x=SwerveConstants.kBackLeftX,
-            location_y=SwerveConstants.kBackLeftY,
-            drive_motor_inverted=ModuleConstants.kBackLeftDriveMotorInverted,
-            steer_motor_inverted=ModuleConstants.kTurningMotorInverted,
-            encoder_inverted=ModuleConstants.kTurningEncoderInverted
-        )
-
-        back_right = module_factory.create_module_constants(
-            steer_motor_id=SwerveConstants.kBackRightTurning,
-            drive_motor_id=SwerveConstants.kBackRightDriving,
-            encoder_id=SwerveConstants.kBackRightTurningEncoder,
-            encoder_offset=ModuleConstants.kBackRightTurningEncoderOffset,
-            location_x=SwerveConstants.kBackRightX,
-            location_y=SwerveConstants.kBackRightY,
-            drive_motor_inverted=ModuleConstants.kBackRightDriveMotorInverted,
-            steer_motor_inverted=ModuleConstants.kTurningMotorInverted,
-            encoder_inverted=ModuleConstants.kTurningEncoderInverted
-        )
-
-        drivetrain_constants = (
-            SwerveDrivetrainConstants()
-            .with_can_bus_name("rio")
-            .with_pigeon2_id(SwerveConstants.kPigeonID)
-        )
-
-        # Drivetrain Builder
-        SwerveDrivetrain.__init__(
-            self,
-            TalonFX, # Drive motor type
-            TalonFX, # Steer motor type
-            CANcoder, # Encoder type
-            drivetrain_constants, # Drivetrain constants
-            SwerveConstants.kOdometryUpdateFrequency, # Odometry update frequency in Hz
-            [
-                front_left,
-                front_right,
-                back_left,
-                back_right
-            ] # Module constants list
-        )
-
-        for module in self.modules:
-            self._configureMotor(
-                module.drive_motor,
-                ModuleConstants.kDrivingMotorIdleMode,
-                ModuleConstants.kDrivingMotorCurrentLimit,
-                ModuleConstants.kDrivingMotorStatorCurrentLimit
-            )
-            self._configureMotor(
-                module.steer_motor,
-                ModuleConstants.kTurningMotorIdleMode,
-                ModuleConstants.kTurningMotorCurrentLimit,
-                ModuleConstants.kTurningStatorCurrentLimit
-            )
+        # Hardware (replay reads everything back from the log instead)
+        self.io = DriveIO() if RobotConstants.kRobotMode == RobotModes.REPLAY else DriveIOCTRE()
+        self.inputs = DriveIO.DriveIOInputs()
 
         # Requests
         self.field_speeds_request = ApplyFieldSpeeds()
@@ -155,26 +52,15 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         # Sim stuff
         self.last_speeds = ChassisSpeeds(0, 0, 0)
 
-    @staticmethod
-    def _configureMotor(motor: TalonFX, neutral_mode, supply_limit: float, stator_limit: float):
-        config = TalonFXConfiguration()
-        motor.configurator.refresh(config)
-
-        config.motor_output.neutral_mode = neutral_mode
-        config.current_limits.supply_current_limit = supply_limit
-        config.current_limits.supply_current_limit_enable = True
-        config.current_limits.stator_current_limit = stator_limit
-        config.current_limits.stator_current_limit_enable = True
-
-        motor.configurator.apply(config)
-
     # Periodic
     def periodic(self) -> None:
         if self.alliance is None:
             self.getAlliance()
 
-        state = self.get_state()
-        pose = state.pose
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs("Drive", self.inputs)
+
+        pose = self.inputs.pose
         self.field.setRobotPose(pose)
 
         SmartDashboard.putNumber("Drivetrain/X", pose.x)
@@ -183,8 +69,8 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
 
         Logger.recordOutput("Drivetrain/Pose", pose)
 
-        for name, module in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), self.modules):
-            SmartDashboard.putNumber(f"Drivetrain/{name}/Position", module.encoder.get_absolute_position().value)
+        for name, position in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), self.inputs.encoderAbsolutePositions):
+            SmartDashboard.putNumber(f"Drivetrain/{name}/Position", position)
 
         # Drivetrain Calibration
         if CALIBRATING_DRIVETRAIN:
@@ -197,37 +83,41 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         Resets the odometry of the drivetrain to the specified pose.
         :param pose: The pose to which to set the odometry.
         """
-        self.reset_pose(pose)
+        self.io.resetPose(pose)
         
+    def add_vision_measurement(self, pose: Pose2d, timestamp: float, stdDevs: tuple[float, float, float]):
+        """
+        :param timestamp: FPGA time (Timer.getTimestamp()) the measurement was taken.
+        """
+        self.io.addVisionMeasurement(pose, timestamp, stdDevs)
+
     def getPose(self) -> Pose2d:
         """
         :return: The current pose of the robot as a Pose2d.
         """
-        return self.get_state().pose
+        return self.inputs.pose
     
     def getHeading(self) -> Rotation2d:
         """
         :return: The current heading of the robot as a Rotation2d.
         """
-        return self.get_state().pose.rotation()
+        return self.inputs.pose.rotation()
 
     def getTurnRate(self) -> float:
         """Degrees per second, counterclockwise positive."""
-        return math.degrees(self.get_state().speeds.omega)
+        return math.degrees(self.inputs.speeds.omega)
 
     def setX(self):
         """
         Sets the robot into X-Break positon.
         """
-        self.set_control(self.brake_request)
+        self.io.setControl(self.brake_request)
 
     def getMotors(self):
         """
         Yields all motors in the drivetrain.
         """
-        for module in self.modules:
-            yield module.drive_motor
-            yield module.steer_motor
+        yield from self.io.getMotors()
             
     def drive(
             self,
@@ -258,12 +148,12 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         self.last_speeds = speeds
         
         if fieldRelative:
-            self.set_control(self.field_speeds_request.with_speeds(speeds))
+            self.io.setControl(self.field_speeds_request.with_speeds(speeds))
         else:
-            self.set_control(self.robot_speeds_request.with_speeds(speeds))
+            self.io.setControl(self.robot_speeds_request.with_speeds(speeds))
 
     def stop(self):
-        self.set_control(self.robot_speeds_request.with_speeds(ChassisSpeeds(0, 0, 0)))
+        self.io.setControl(self.robot_speeds_request.with_speeds(ChassisSpeeds(0, 0, 0)))
         
     # Autonomous support
     def driveRobotRelativeChassisSpeeds(self, speeds: ChassisSpeeds, feedforwards):
@@ -277,10 +167,10 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
                 .with_wheel_force_feedforwards_y(feedforwards.robotRelativeForcesYNewtons)
             )
 
-        self.set_control(request)
+        self.io.setControl(request)
         
     def getRobotRelativeSpeeds(self):
-        return self.get_state().speeds
+        return self.inputs.speeds
 
     def getAlliance(self):
         operator_perspective_set = False
@@ -291,8 +181,8 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         if self.alliance is not None and not operator_perspective_set:
             operator_perspective_set = True
             if self.alliance == DriverStation.Alliance.kRed:
-                self.set_operator_perspective_forward(Rotation2d.fromDegrees(180))
+                self.io.setOperatorPerspectiveForward(Rotation2d.fromDegrees(180))
             else:
-                self.set_operator_perspective_forward(Rotation2d.fromDegrees(0))
+                self.io.setOperatorPerspectiveForward(Rotation2d.fromDegrees(0))
 
         return self.alliance

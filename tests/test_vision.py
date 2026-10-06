@@ -24,7 +24,7 @@ class FakeDrivetrain:
 
 @pytest.fixture
 def localizer_with_camera(monkeypatch):
-    monkeypatch.setattr(limelight_localizer.utils, "get_current_time_seconds", lambda: 100.0)
+    monkeypatch.setattr(limelight_localizer.Timer, "getTimestamp", lambda: 100.0)
     LimelightLocalizer._instance = None
 
     def make(botpose, turnRate=0.0):
@@ -34,8 +34,8 @@ def localizer_with_camera(monkeypatch):
 
         camera = LimelightCamera("limelight-test")
         localizer.addCamera(camera, Translation3d(0.3, 0.0, 0.2), Rotation2d())
+        camera.inputs.botPose = botpose
         camera.ticked = True
-        camera.botPose.set(botpose)
 
         localizer.periodic()
         return drivetrain.measurements

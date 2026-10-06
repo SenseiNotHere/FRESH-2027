@@ -3,6 +3,7 @@
 # Open Source Software; you can modify and/or share it under the terms of
 # the WPILib BSD license file in the root directory of this project.
 #
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from wpilib import Timer, RobotController
@@ -10,9 +11,53 @@ from commands2 import Subsystem
 from ntcore import NetworkTableInstance, StringPublisher, StringArrayPublisher
 from wpimath.geometry import Rotation2d
 from wpinet import PortForwarder
+from pykit.autolog import autolog
 from pykit.logger import Logger
 
+from constants import RobotConstants, RobotModes
+
 from utils import log
+
+
+class LimelightIO:
+    """Everything the robot reads from a Limelight. This base class reads nothing, which is what replay uses."""
+
+    @autolog
+    @dataclass
+    class LimelightIOInputs:
+        tx: float = 0.0
+        ty: float = 0.0
+        ta: float = 0.0
+        heartbeat: int = 0
+        pipeline: int = -1
+        tagID: str = ""
+        botPose: list[float] = field(default_factory=list)
+        botPoseFlipped: list[float] = field(default_factory=list)
+
+    def updateInputs(self, inputs: LimelightIOInputs) -> None:
+        pass
+
+
+class LimelightIONetworkTables(LimelightIO):
+    def __init__(self, table) -> None:
+        self.table = table
+        self.pipelineIndex = table.getDoubleTopic("getpipe").getEntry(-1)
+        self.tx = table.getDoubleTopic("tx").getEntry(0.0)
+        self.ty = table.getDoubleTopic("ty").getEntry(0.0)
+        self.ta = table.getDoubleTopic("ta").getEntry(0.0)
+        self.hb = table.getIntegerTopic("hb").getEntry(0)
+        self.botPose = table.getDoubleArrayTopic("botpose_orb_wpiblue").getEntry([])
+        self.botPoseFlipped = table.getDoubleArrayTopic("botpose_orb_wpired").getEntry([])
+
+    def updateInputs(self, inputs: LimelightIO.LimelightIOInputs) -> None:
+        inputs.tx = float(self.tx.get())
+        inputs.ty = float(self.ty.get())
+        inputs.ta = float(self.ta.get())
+        inputs.heartbeat = int(self.hb.get())
+        inputs.pipeline = int(self.pipelineIndex.get(-1))
+        inputs.tagID = self.table.getString("tid", "")
+        inputs.botPose = [float(v) for v in self.botPose.get()]
+        inputs.botPoseFlipped = [float(v) for v in self.botPoseFlipped.get()]
 
 
 class LimelightCamera(Subsystem):
@@ -25,16 +70,15 @@ class LimelightCamera(Subsystem):
         self.table = instance.getTable(self.cameraName)
         self._path = self.table.getPath()
 
+        # Reads go through io so replay can feed them from the log; writes below go straight to NT
+        self.io = LimelightIO() if RobotConstants.kRobotMode == RobotModes.REPLAY else LimelightIONetworkTables(self.table)
+        self.inputs = LimelightIO.LimelightIOInputs()
+
         self.pipelineIndexRequest = self.table.getDoubleTopic("pipeline").publish()
-        self.pipelineIndex = self.table.getDoubleTopic("getpipe").getEntry(-1)
         # "cl" and "tl" are additional latencies in milliseconds
 
         self.ledMode = self.table.getIntegerTopic("ledMode").getEntry(-1)
         self.camMode = self.table.getIntegerTopic("camMode").getEntry(-1)
-        self.tx = self.table.getDoubleTopic("tx").getEntry(0.0)
-        self.ty = self.table.getDoubleTopic("ty").getEntry(0.0)
-        self.ta = self.table.getDoubleTopic("ta").getEntry(0.0)
-        self.hb = self.table.getIntegerTopic("hb").getEntry(0)
 
         self.lastHeartbeat = 0
         self.lastHeartbeatTime = 0
@@ -79,44 +123,45 @@ class LimelightCamera(Subsystem):
         if self.localizerSubscribed:
             return
 
+        # localizer results come back in inputs.botPose / inputs.botPoseFlipped
         self.localizerSubscribed = True
-        # we can then receive the localizer results from the camera back
-        self.botPose = self.table.getDoubleArrayTopic("botpose_orb_wpiblue").getEntry([])
-        self.botPoseFlipped = self.table.getDoubleArrayTopic("botpose_orb_wpired").getEntry([])
 
     def setPipeline(self, index: int):
         self.pipelineIndexRequest.set(float(index))
         self.heartbeating = False  # wait until the next heartbeat before saying self.haveDetection == true
 
     def getPipeline(self) -> int:
-        return int(self.pipelineIndex.get(-1))
+        return self.inputs.pipeline
 
     def getA(self) -> float:
-        return self.ta.get()
+        return self.inputs.ta
 
     def getX(self) -> float:
-        return self.tx.get()
+        return self.inputs.tx
 
     def getY(self) -> float:
-        return self.ty.get()
+        return self.inputs.ty
 
     def getHB(self) -> float:
-        return self.hb.get()
+        return self.inputs.heartbeat
 
     def hasDetection(self):
         if self.getX() != 0.0 and self.heartbeating:
             return True
 
     def getSecondsSinceLastHeartbeat(self) -> float:
-        return Timer.getFPGATimestamp() - self.lastHeartbeatTime
+        return Timer.getTimestamp() - self.lastHeartbeatTime
 
     def periodic(self) -> None:
+        self.io.updateInputs(self.inputs)
+        Logger.processInputs(f"Vision/{self.cameraName}", self.inputs)
+
         if self.ntStreams is not None and self.ntSource is not None:
             # keep overriding the feed info with the forwarded camera feed address
             self.ntStreams.set(self.ntStreamsValue)
             self.ntSource.set(self.ntSourceValue)
 
-        now = Timer.getFPGATimestamp()
+        now = Timer.getTimestamp()
         heartbeat = self.getHB()
         self.ticked = False
         if heartbeat != self.lastHeartbeat:
@@ -160,12 +205,12 @@ class LimelightCamera(Subsystem):
         self.table.putNumber("stream", mode)
 
     def getAprilTagID(self) -> int | None:
-        rawID = self.table.getString("tid", "")
+        rawID = self.inputs.tagID
         tagID = int(rawID) if rawID.isdigit() else None
         return tagID
 
     def getRedAprilTagID(self) -> int | None:
-        rawID = self.table.getString("tid", "")
+        rawID = self.inputs.tagID
         tagID = int(rawID) if rawID.isdigit() else None
         return tagID
 

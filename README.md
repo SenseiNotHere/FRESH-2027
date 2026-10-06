@@ -80,7 +80,7 @@ class ScoringState(Enum):
     ALIGNING_TO_TARGET = 5
 ```
 
-New job that should run alongside the others (a climber, say)? Make a new enum with an `IDLE`, then add it to `STATE_VARIABLES` in `superstructure.py` and give the Superstructure a `climber_state = ClimberState.IDLE`.
+New job that should run alongside the others (a climber, say)? Make a new enum with an `IDLE`, then add `ClimberState: ClimberState.IDLE` to `self.states` in `superstructure.py`.
 
 Name it after what the robot is doing, not which motor spins.
 
@@ -106,10 +106,10 @@ Open:
 
     superstructure/superstructure.py
 
-Add your state to the `_state_handlers` dictionary:
+Add your state to the `_handlers` dictionary:
 
 ``` python
-self._state_handlers = {
+self._handlers = {
     ScoringState.IDLE: self._handle_scoring_idle,
     ...
     ScoringState.ALIGNING_TO_TARGET: self._handle_aligning_to_target,
@@ -130,8 +130,9 @@ Add a method next to the other handlers for that enum. The existing intaking han
 
 ``` python
 def _handle_intaking(self):
-    self._deploy_intake_pivot()
-    self._start_intake_rollers()
+    if self.intake is not None:
+        self.intake.deploy()
+        self.intake.intake()
 ```
 
 Handlers:
@@ -149,7 +150,7 @@ The handler runs every loop while the state is active, so write it to be safe to
 
 ## 4️⃣ Helpers
 
-Shared logic that more than one handler needs goes below the handlers in `superstructure.py`, under `# Intake`, `# Shooter`, `# Feeders`, or `# Orchestra` or whatever other subsystem added.
+Shared logic that more than one handler needs goes below the handlers in `superstructure.py`, under `# Music`, `# Intake`, `# Scoring`, or whatever other job you added.
 
 `_stop_feeders()` and `_spin_up_shooters()` already live there. Copy their shape.
 

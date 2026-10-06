@@ -8,6 +8,8 @@ from wpimath.geometry import Pose2d, Rotation2d, Translation2d
 from wpimath.kinematics import ChassisSpeeds
 from wpimath.filter import SlewRateLimiter
 
+from pykit.logger import Logger
+
 from phoenix6.hardware import TalonFX, CANcoder
 from phoenix6.configs import TalonFXConfiguration
 
@@ -178,6 +180,8 @@ class DriveSubsystem(Subsystem, SwerveDrivetrain[TalonFX, TalonFX, CANcoder]):
         SmartDashboard.putNumber("Drivetrain/X", pose.x)
         SmartDashboard.putNumber("Drivetrain/Y", pose.y)
         SmartDashboard.putNumber("Drivetrain/Heading", pose.rotation().degrees())
+
+        Logger.recordOutput("Drivetrain/Pose", pose)
 
         for name, module in zip(("FrontLeft", "FrontRight", "BackLeft", "BackRight"), self.modules):
             SmartDashboard.putNumber(f"Drivetrain/{name}/Position", module.encoder.get_absolute_position().value)

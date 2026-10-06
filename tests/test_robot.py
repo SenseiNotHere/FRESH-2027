@@ -29,4 +29,4 @@ def test_sim_shooters_reach_speed_and_shoot(robot, control):
         superstructure = robot.robot_container.superstructure
         superstructure.setState(ScoringState.PREP_SHOT)
         control.step_timing(seconds=0.5, autonomous=False, enabled=True)
-        assert superstructure.scoring_state == ScoringState.SHOOTING
+        assert superstructure.states[ScoringState] == ScoringState.SHOOTING

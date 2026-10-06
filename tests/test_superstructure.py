@@ -62,8 +62,8 @@ def test_releasing_shoot_keeps_operator_intaking(superstructure):
     superstructure.setState(ScoringState.SHOOTING)  # as if PREP_SHOT had advanced
     shoot.end(False)
 
-    assert superstructure.intake_state == IntakeState.INTAKING
-    assert superstructure.scoring_state == ScoringState.IDLE
+    assert superstructure.states[IntakeState] == IntakeState.INTAKING
+    assert superstructure.states[ScoringState] == ScoringState.IDLE
 
 
 def test_prep_shot_waits_for_speed_then_keeps_shooting(superstructure):
@@ -77,16 +77,16 @@ def test_prep_shot_waits_for_speed_then_keeps_shooting(superstructure):
         superstructure.update()
 
     step(0.02, True)
-    assert superstructure.scoring_state == ScoringState.PREP_SHOT  # one at-speed sample isn't enough
+    assert superstructure.states[ScoringState] == ScoringState.PREP_SHOT  # one at-speed sample isn't enough
     assert not indexer.feeding
 
     step(0.1, True)
-    assert superstructure.scoring_state == ScoringState.SHOOTING
+    assert superstructure.states[ScoringState] == ScoringState.SHOOTING
     step(0.02, True)
     assert indexer.feeding
 
     step(0.5, False)
-    assert superstructure.scoring_state == ScoringState.SHOOTING  # no fallback once shooting
+    assert superstructure.states[ScoringState] == ScoringState.SHOOTING  # no fallback once shooting
     assert indexer.feeding
 
 
@@ -98,6 +98,6 @@ def test_disable_resets_game_states_but_not_music(superstructure):
     set_enabled(False)
     superstructure.update()
 
-    assert superstructure.intake_state == IntakeState.IDLE
-    assert superstructure.scoring_state == ScoringState.IDLE
-    assert superstructure.music_state == MusicState.PLAYING_SONG
+    assert superstructure.states[IntakeState] == IntakeState.IDLE
+    assert superstructure.states[ScoringState] == ScoringState.IDLE
+    assert superstructure.states[MusicState] == MusicState.PLAYING_SONG
